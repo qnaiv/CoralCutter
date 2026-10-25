@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0b6f86" />
+    <meta
+      name="description"
+      content="Coral Cutter — 海底を刈って、基地で売って、潜水艦を強化するブラウザゲーム"
+    />
+    <title>Coral Cutter</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="app">
+      <div id="gl-error" hidden>このブラウザでは3Dを表示できません。</div>
+      <div id="hud" hidden>
+        <header class="top interactive">
+          <div class="brand">
+            <div class="logo">Coral Cutter</div>
+            <div id="objective"></div>
+            <div id="can-cut"></div>
+          </div>
+          <div class="top-right">
+            <button id="mute" class="interactive" type="button">音ON</button>
+            <div class="money" aria-live="polite">
+              <span class="coin" aria-hidden="true"></span>
+              <span id="money-value">0</span>
+            </div>
+          </div>
+        </header>
+        <div id="toast" aria-live="polite"></div>
+        <div id="status-hint" hidden></div>
+        <div id="combo" hidden></div>
+        <div id="full-banner" hidden>タンクが満タン！基地へ戻ろう</div>
+        <div id="move-hint" hidden>WASD / 矢印、またはドラッグで移動</div>
+        <div class="dock interactive">
+          <canvas id="minimap" width="168" height="168" aria-hidden="true"></canvas>
+          <div class="tank-card">
+            <div id="zone-pill">基地</div>
+            <div class="tank-label">
+              <span>タンク</span>
+              <span id="tank-text">0 / 16</span>
+            </div>
+            <div class="tank-bar"><div id="tank-fill"></div></div>
+            <div id="payout" hidden></div>
+            <div id="nav-hint" hidden></div>
+          </div>
+        </div>
+        <section id="upgrade" class="interactive" hidden>
+          <div class="upgrade-title">基地の強化</div>
+          <div id="upgrade-cards"></div>
+        </section>
+        <div id="stick" hidden>
+          <div id="stick-nub"></div>
+        </div>
+      </div>
+      <div id="title">
+        <div class="title-card interactive">
+          <p class="eyebrow">海底ハーベスト</p>
+          <h1>Coral Cutter</h1>
+          <p class="tagline">刈って、売って、深みへ。</p>
+          <ul>
+            <li>WASD / 矢印、またはドラッグで移動</li>
+            <li>カッターが触れた海藻やサンゴを切断</li>
+            <li>基地の光る円に入ると自動で売却</li>
+            <li>強化して、硬い海域も刈れるように</li>
+          </ul>
+          <p id="title-stats"></p>
+          <button id="start" type="button">もぐる</button>
+          <button id="reset" class="ghost" type="button">データ消去</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
