@@ -190,7 +190,8 @@ export class Resources {
     }
   }
 
-  update(dt, time) {
+  update(dt, time, focus) {
+    this._focus = focus || null;
     for (let i = 0; i < this.entities.length; i++) {
       const e = this.entities[i];
       if (e.hitCd > 0) e.hitCd = Math.max(0, e.hitCd - dt);
@@ -217,17 +218,26 @@ export class Resources {
         }
       }
     }
-    this.sync(time);
+    this.sync(time, this._focus);
   }
 
-  sync(time) {
+  sync(time, focus) {
     const dummy = this._dummy;
     const tint = this._color;
+    const fx = focus?.x ?? 0;
+    const fz = focus?.z ?? 0;
+    const cull = focus ? 78 * 78 : Infinity;
     for (let g = 0; g < this.groups.length; g++) {
       const group = this.groups[g];
       const { mesh, entities } = group;
+      let dirty = false;
       for (let i = 0; i < entities.length; i++) {
         const e = entities[i];
+        const dx = e.x - fx;
+        const dz = e.z - fz;
+        const idle = e.state === 'alive' && e.flash <= 0;
+        if (idle && dx * dx + dz * dz > cull) continue;
+        dirty = true;
         const sway =
           Math.sin(time * e.type.swaySpeed + e.phase) *
           e.type.swayAmp *
@@ -260,6 +270,7 @@ export class Resources {
         if (e.flash > 0) tint.lerp(e.flashHard ? this._red : this._white, e.flash * 0.85);
         mesh.setColorAt(i, tint);
       }
+      if (!dirty) continue;
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }

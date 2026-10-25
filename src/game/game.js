@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { AudioBus } from './audio.js';
 import {
   CUTTER_LEVELS,
+  DEPTH_LEVELS,
   PADS,
   POWER_NEED,
   PRICE_LEVELS,
@@ -10,6 +11,7 @@ import {
   TANK_LEVELS,
   UPGRADE_RADIUS,
   UPGRADES,
+  WORLD,
   WORLD_LIMIT,
   WRECK,
   cutterStats,
@@ -24,8 +26,11 @@ import { CargoDrone } from './drone.js';
 import {
   BASE_MAX,
   FACILITIES,
+  accessAt,
   baseUpgradeCost,
+  containPosition,
   droneStats,
+  nextGateHint,
   facilityCost,
   outpostArrival,
   outpostBlocked,
@@ -44,7 +49,7 @@ import { Player } from './player.js';
 import { Resources } from './resources.js';
 import { BigTargets } from './targets.js';
 import { clearSave, loadSave, writeSave } from './save.js';
-import { zoneAt } from './terrain.js';
+import { zoneAt, zoneForPlayer } from './terrain.js';
 import { UI } from './ui.js';
 import { World } from './world.js';
 
@@ -59,6 +64,7 @@ export class Game {
       tank: clamp(this.save.levels.tank, 1, TANK_LEVELS.length),
       propeller: clamp(this.save.levels.propeller, 1, PROP_LEVELS.length),
       price: clamp(this.save.levels.price, 1, PRICE_LEVELS.length),
+      depth: clamp(this.save.levels.depth || 1, 1, DEPTH_LEVELS.length),
     };
     this.stats = { ...this.save.stats };
     this.baseLevel = clamp(this.save.baseLevel || 1, 1, BASE_MAX);
@@ -77,6 +83,8 @@ export class Game {
     this.combo = 0;
     this.comboTime = -10;
     this.hardHintAt = -10;
+    this.gateHintAt = -10;
+    this.inFarDeep = false;
     this.statusHint = '';
     this.statusUntil = 0;
     this.fullHintAt = -10;
@@ -192,7 +200,7 @@ export class Game {
 
   snapshot() {
     return {
-      version: 2,
+      version: 3,
       money: this.money,
       levels: { ...this.levels },
       baseLevel: this.baseLevel,
@@ -435,6 +443,12 @@ export class Game {
     this.levels[id] += 1;
     let message = `${def.name}を強化した`;
     if (id === 'cutter') message = CUTTER_LEVELS[this.levels.cutter - 1].shout || message;
+    if (id === 'depth') {
+      const row = DEPTH_LEVELS[this.levels.depth - 1];
+      message = this.levels.cutter >= row.cutter
+        ? `${row.reach}まで進める`
+        : `深度Lv${this.levels.depth}（${row.reach}はカッターLv${row.cutter}も）`;
+    }
     if (id === 'tank') message = `タンク容量 ${tankCapacity(this.levels.tank)}`;
     if (id === 'propeller') message = '速度が上がった！';
     if (id === 'price') message = `売値が ×${priceMult(this.levels.price).toFixed(2)} になった`;
@@ -529,10 +543,24 @@ export class Game {
     this.persist();
   }
 
+  holdAtGate() {
+    const gate = containPosition(this.player.x, this.player.z, this.levels.cutter, this.levels.depth);
+    if (!gate.blocked) return;
+    this.player.pin(gate.x, gate.z);
+    if (gate.ring) shedRadial(this.player);
+    if (gate.wreck) shedToward(this.player, WRECK.x, WRECK.z);
+    if (this.time - this.gateHintAt > 3.4 && gate.message) {
+      this.gateHintAt = this.time;
+      this.ui.toast(gate.message, 'info');
+      this.audio.playSfx('deny');
+    }
+  }
+
   movePlayer(x, z) {
-    this.player.placeAt(x, z);
-    this.wasInside = Boolean(this.insideSell(x, z));
-    const zone = zoneAt(x, z);
+    const gate = containPosition(x, z, this.levels.cutter, this.levels.depth);
+    this.player.placeAt(gate.x, gate.z);
+    this.wasInside = Boolean(this.insideSell(gate.x, gate.z));
+    const zone = zoneForPlayer(gate.x, gate.z, this.levels.cutter, this.levels.depth);
     if (zone.id !== this.zone.id) {
       this.zone = zone;
       this.audio.setZone(zone.id);
@@ -552,11 +580,29 @@ export class Game {
     }
     const entry = this.outposts.list[index];
     if (!entry) return;
-    const spot = outpostArrival(entry, this.outposts.radius);
+    const spot = this.warpLanding(entry);
+    if (!spot) {
+      this.ui.toast(nextGateHint(this.levels.cutter, this.levels.depth), 'info');
+      this.audio.playSfx('deny');
+      return;
+    }
     this.movePlayer(spot.x, spot.z);
     this.armWarp();
     this.ui.toast('前線基地へ', 'info');
     this.audio.playSfx('zone', { deeper: true });
+  }
+
+  warpLanding(outpost) {
+    const outward = outpostArrival(outpost, this.outposts.radius);
+    if (!containPosition(outward.x, outward.z, this.levels.cutter, this.levels.depth).blocked) return outward;
+    const len = Math.hypot(outpost.x, outpost.z) || 1;
+    const gap = this.outposts.radius + 8;
+    const inward = {
+      x: outpost.x - (outpost.x / len) * gap,
+      z: outpost.z - (outpost.z / len) * gap,
+    };
+    if (!containPosition(inward.x, inward.z, this.levels.cutter, this.levels.depth).blocked) return inward;
+    return null;
   }
 
   warpHome() {
@@ -631,10 +677,13 @@ export class Game {
     const cutter = cutterStats(this.levels.cutter);
     this.player.cutMode = this.frameCutMode;
     this.player.update(dt, move, speed, this.world.colliders, cutter.range);
+    if (this.started) this.holdAtGate();
 
     if (this.started) {
       if (!this.movedOnce && this.player.speed > 1.2) this.movedOnce = true;
-      const zone = zoneAt(this.player.x, this.player.z);
+      const zone = zoneForPlayer(this.player.x, this.player.z, this.levels.cutter, this.levels.depth);
+      const access = accessAt(this.levels.cutter, this.levels.depth);
+      const far = Math.hypot(this.player.x, this.player.z) > WORLD.innerDeep + 0.35 && access.radius > WORLD.innerDeep;
       if (zone.id !== this.zone.id) {
         const prev = this.zone;
         const deeper = zone.rank > prev.rank;
@@ -642,6 +691,13 @@ export class Game {
         this.audio.setZone(zone.id);
         this.audio.playSfx('zone', { deeper });
         if (deeper) this.ui.toast(zone.enter, 'info');
+        this.inFarDeep = zone.id === 'deep' && far;
+      } else if (zone.id === 'deep' && far && !this.inFarDeep) {
+        this.inFarDeep = true;
+        this.ui.toast('深海の奥へ入った', 'info');
+        this.audio.playSfx('zone', { deeper: true });
+      } else if (!far) {
+        this.inFarDeep = false;
       }
       this.trySell();
       this.frameCutMode = 'idle';
@@ -685,7 +741,7 @@ export class Game {
     }
 
     this.outposts.update(dt, this.time);
-    this.resources.update(dt, this.time);
+    this.resources.update(dt, this.time, { x: this.player.x, z: this.player.z });
     this.targets.update(dt, this.time, {
       x: this.player.x,
       z: this.player.z,
@@ -710,7 +766,7 @@ export class Game {
     const home = this.player.getCargoWorld();
     this.fx.update(dt, home);
 
-    const depth = smoothstep(120, 220, dist);
+    const depth = smoothstep(220, 380, dist);
     this.player.lamp.intensity = 8 + depth * 34;
     this.player.lamp.distance = 16 + depth * 12;
 
@@ -723,6 +779,7 @@ export class Game {
         money: this.displayMoney,
         rawMoney: this.money,
         cutterLevel: this.levels.cutter,
+        depthLevel: this.levels.depth,
         tankLevel: this.levels.tank,
         propLevel: this.levels.propeller,
         priceLevel: this.levels.price,
@@ -796,6 +853,30 @@ export class Game {
       this.shake = Math.max(0, this.shake - dt * 1.7);
     }
     this.camera.lookAt(this.curLook);
+  }
+}
+
+function shedRadial(player) {
+  const dist = Math.hypot(player.x, player.z) || 1;
+  const rx = player.x / dist;
+  const rz = player.z / dist;
+  const radial = player.vx * rx + player.vz * rz;
+  if (radial > 0) {
+    player.vx -= radial * rx;
+    player.vz -= radial * rz;
+  }
+}
+
+function shedToward(player, x, z) {
+  const dx = x - player.x;
+  const dz = z - player.z;
+  const dist = Math.hypot(dx, dz) || 1;
+  const ix = dx / dist;
+  const iz = dz / dist;
+  const inward = player.vx * ix + player.vz * iz;
+  if (inward > 0) {
+    player.vx -= inward * ix;
+    player.vz -= inward * iz;
   }
 }
 
