@@ -21,6 +21,12 @@ export class UI {
     this.fullBanner = document.getElementById('full-banner');
     this.moveHint = document.getElementById('move-hint');
     this.muteBtn = document.getElementById('mute');
+    this.settingsBtn = document.getElementById('audio-settings');
+    this.popover = document.getElementById('audio-popover');
+    this.bgmSlider = document.getElementById('bgm-volume');
+    this.seSlider = document.getElementById('se-volume');
+    this.bgmValue = document.getElementById('bgm-volume-value');
+    this.seValue = document.getElementById('se-volume-value');
     this.stick = document.getElementById('stick');
     this.nub = document.getElementById('stick-nub');
     this.titleStats = document.getElementById('title-stats');
@@ -34,6 +40,7 @@ export class UI {
     this.onBuy = null;
     this.onDeny = null;
     this.onUi = null;
+    this.onVolumes = null;
 
     this.startBtn.addEventListener('click', () => {
       this.onUi?.();
@@ -44,6 +51,22 @@ export class UI {
       this.onReset?.();
     });
     this.muteBtn.addEventListener('click', () => this.onToggleMute?.());
+    this.settingsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = this.popover.hidden;
+      this.popover.hidden = !open;
+      this.settingsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    this.popover.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.bgmSlider.addEventListener('input', () => this.emitVolumes());
+    this.seSlider.addEventListener('input', () => this.emitVolumes());
+    this.seSlider.addEventListener('change', () => this.onUi?.());
+    document.addEventListener('pointerdown', (e) => {
+      if (this.popover.hidden) return;
+      if (this.settingsBtn.contains(e.target) || this.popover.contains(e.target)) return;
+      this.popover.hidden = true;
+      this.settingsBtn.setAttribute('aria-expanded', 'false');
+    });
     this.cards.addEventListener('pointerdown', (e) => {
       const btn = e.target.closest('[data-buy]');
       if (!btn || btn.disabled) return;
@@ -61,6 +84,21 @@ export class UI {
         this.onStart?.();
       }
     });
+  }
+
+  setVolumes(bgm, se) {
+    this.bgmSlider.value = String(bgm);
+    this.seSlider.value = String(se);
+    this.bgmValue.textContent = String(bgm);
+    this.seValue.textContent = String(se);
+  }
+
+  emitVolumes() {
+    const bgm = Number(this.bgmSlider.value);
+    const se = Number(this.seSlider.value);
+    this.bgmValue.textContent = String(bgm);
+    this.seValue.textContent = String(se);
+    this.onVolumes?.(bgm, se);
   }
 
   setTitleStats(save) {

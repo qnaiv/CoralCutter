@@ -62,7 +62,18 @@ export class AudioBus {
     this.nextStepTime = 0;
     this.resumeAt = 0;
     this.musicReady = false;
-    this.masterLevel = 0.8;
+    this.masterLevel = 3;
+    this.bgm = 1;
+    this.se = 1;
+  }
+
+  /**
+   * User mix, each 0–1. Mute still silences both buses.
+   */
+  setLevels(bgm, se) {
+    if (Number.isFinite(bgm)) this.bgm = Math.min(1, Math.max(0, bgm));
+    if (Number.isFinite(se)) this.se = Math.min(1, Math.max(0, se));
+    this._applyBusGains();
   }
 
   unlock() {
@@ -151,14 +162,15 @@ export class AudioBus {
     const master = ctx.createGain();
     master.gain.value = this.muted ? 0 : this.masterLevel;
     const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -12;
-    comp.knee.value = 8;
-    comp.ratio.value = 6;
-    comp.attack.value = 0.004;
-    comp.release.value = 0.18;
+    comp.threshold.value = -2;
+    comp.knee.value = 6;
+    comp.ratio.value = 12;
+    comp.attack.value = 0.003;
+    comp.release.value = 0.12;
     master.connect(comp);
     comp.connect(ctx.destination);
     this.master = master;
+    this.comp = comp;
 
     const musicFilter = ctx.createBiquadFilter();
     musicFilter.type = 'lowpass';
@@ -168,12 +180,16 @@ export class AudioBus {
     bed.gain.value = 0.0001;
     const duck = ctx.createGain();
     duck.gain.value = 1;
+    const bgmGain = ctx.createGain();
+    bgmGain.gain.value = this.bgm;
     musicFilter.connect(bed);
     bed.connect(duck);
-    duck.connect(master);
+    duck.connect(bgmGain);
+    bgmGain.connect(master);
     this.musicFilter = musicFilter;
     this.bed = bed;
     this.duck = duck;
+    this.bgmGain = bgmGain;
 
     const melodyBus = ctx.createGain();
     melodyBus.gain.value = 1;
@@ -259,9 +275,13 @@ export class AudioBus {
     sfxFilter.type = 'lowpass';
     sfxFilter.frequency.value = 2800;
     sfxFilter.Q.value = 0.4;
+    const seGain = ctx.createGain();
+    seGain.gain.value = this.se;
     sfxGain.connect(sfxFilter);
-    sfxFilter.connect(master);
+    sfxFilter.connect(seGain);
+    seGain.connect(master);
     this.sfxGain = sfxGain;
+    this.seGain = seGain;
 
     const silent = ctx.createBuffer(1, 1, ctx.sampleRate);
     const pop = ctx.createBufferSource();
@@ -275,6 +295,13 @@ export class AudioBus {
     this.musicReady = true;
     this.nextStepTime = now + 0.12;
     this._applyZone();
+  }
+
+  _applyBusGains() {
+    if (!this.ctx || !this.bgmGain || !this.seGain) return;
+    const now = this.ctx.currentTime;
+    this.bgmGain.gain.setTargetAtTime(this.bgm, now, 0.03);
+    this.seGain.gain.setTargetAtTime(this.se, now, 0.03);
   }
 
   _settle() {

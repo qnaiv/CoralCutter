@@ -31,7 +31,21 @@
             <div id="can-cut"></div>
           </div>
           <div class="top-right">
+            <button id="audio-settings" class="interactive" type="button" aria-label="音量" aria-expanded="false">♪</button>
             <button id="mute" class="interactive" type="button">音ON</button>
+            <div id="audio-popover" class="audio-popover interactive" hidden>
+              <p>音量</p>
+              <label class="vol-row">
+                BGM
+                <input id="bgm-volume" type="range" min="0" max="100" value="100" aria-label="BGM" />
+                <span id="bgm-volume-value">100</span>
+              </label>
+              <label class="vol-row">
+                効果音
+                <input id="se-volume" type="range" min="0" max="100" value="100" aria-label="効果音" />
+                <span id="se-volume-value">100</span>
+              </label>
+            </div>
             <div class="money" aria-live="polite">
               <span class="coin" aria-hidden="true"></span>
               <span id="money-value">0</span>
