@@ -5,7 +5,7 @@
  *
  * playSfx(name, opts?) names:
  * cut, pickup (alias vacuum), full, sell, buy, deny, zone, ui, clank,
- * shatter, bigHit, bigBreak.
+ * shatter, bigHit, bigBreak, catch, bonk, pearl, tow, dig.
  * `zone` takes `{ deeper: boolean }`.
  */
 
@@ -661,5 +661,46 @@ const SFX = {
         priority: 5,
       });
     }
+  },
+  catch(bus) {
+    if (!bus._gap('catch', 0.12)) return;
+    const vary = 0.94 + Math.random() * 0.1;
+    bus._noise({ dur: 0.13, gain: 0.062, freq: 980 * vary, q: 0.55, priority: 3 });
+    bus._tone({ freq: 420 * vary, dur: 0.16, type: 'sine', gain: 0.055, slide: 210, priority: 3 });
+    bus._tone({ freq: 680 * vary, dur: 0.1, type: 'triangle', gain: 0.03, delay: 0.05, slide: -50, priority: 2 });
+  },
+  bonk(bus) {
+    if (!bus._gap('bonk', 0.16)) return;
+    bus._tone({ freq: 118, dur: 0.1, type: 'sine', gain: 0.09, slide: -36, priority: 3 });
+    bus._noise({ dur: 0.06, gain: 0.045, freq: 210, q: 1.1, priority: 2 });
+    bus._tone({ freq: 86, dur: 0.12, type: 'triangle', gain: 0.05, delay: 0.03, slide: -18, priority: 3 });
+  },
+  pearl(bus) {
+    if (!bus._gap('pearl', 0.22)) return;
+    bus._duck(0.72, 0.36);
+    const notes = [784, 988, 1175, 1568];
+    for (let i = 0; i < notes.length; i++) {
+      bus._tone({
+        freq: notes[i],
+        dur: 0.2,
+        type: 'sine',
+        gain: 0.042,
+        delay: i * 0.055,
+        attack: 0.008,
+        priority: 4,
+      });
+    }
+  },
+  tow(bus) {
+    if (!bus._gap('tow', 0.22)) return;
+    bus._tone({ freq: 96, dur: 0.14, type: 'triangle', gain: 0.1, slide: -28, priority: 3 });
+    bus._noise({ dur: 0.09, gain: 0.055, freq: 170, q: 0.75, priority: 3 });
+    bus._tone({ freq: 64, dur: 0.18, type: 'sine', gain: 0.07, delay: 0.04, slide: -12, priority: 3 });
+  },
+  dig(bus) {
+    if (!bus._gap('dig', 0.28)) return;
+    bus._noise({ dur: 0.28, gain: 0.07, freq: 140, q: 0.4, priority: 3 });
+    bus._tone({ freq: 78, dur: 0.24, type: 'sine', gain: 0.08, slide: -22, priority: 3 });
+    bus._noise({ dur: 0.12, gain: 0.04, freq: 260, q: 0.7, delay: 0.08, priority: 2 });
   },
 };
