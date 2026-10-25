@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { CLEARINGS } from './activities.js';
 import { RESOURCE_TYPES, WRECK } from './constants.js';
 import { mulberry32 } from './math.js';
 import { groundHeight, inWreck } from './terrain.js';
@@ -19,15 +20,16 @@ export class Resources {
   _build() {
     const rand = mulberry32(20261025);
     const geos = buildGeometries();
-    const placed = [];
+    const placed = CLEARINGS.map((spot) => ({ x: spot.x, z: spot.z, minDist: spot.minDist }));
     const byType = new Map();
 
     for (const type of RESOURCE_TYPES) {
+      const glow = EMISSIVE[type.id] || [0x000000, 0];
       const mat = new THREE.MeshLambertMaterial({
         color: 0xffffff,
         flatShading: true,
-        emissive: type.id === 'deep' ? 0x1ad0ff : type.id === 'pearl' ? 0x665533 : 0x000000,
-        emissiveIntensity: type.id === 'deep' ? 0.85 : type.id === 'pearl' ? 0.25 : 0,
+        emissive: glow[0],
+        emissiveIntensity: glow[1],
       });
       const spots = [];
       const sample = () => {
@@ -366,6 +368,87 @@ function deepGeo() {
   return merge(parts);
 }
 
+function anemoneGeo() {
+  const parts = [];
+  const base = new THREE.CylinderGeometry(0.42, 0.52, 0.3, 7);
+  base.translate(0, 0.15, 0);
+  parts.push(base);
+  for (let i = 0; i < 7; i++) {
+    const tent = new THREE.CylinderGeometry(0.045, 0.07, 0.9, 4);
+    const a = (i / 7) * Math.PI * 2;
+    tent.translate(0, 0.45, 0);
+    tent.rotateZ(0.72);
+    tent.rotateY(a);
+    tent.translate(Math.sin(a) * 0.22, 0.22, Math.cos(a) * 0.22);
+    parts.push(tent);
+  }
+  return merge(parts);
+}
+
+function fanCoralGeo() {
+  const parts = [];
+  const stem = new THREE.CylinderGeometry(0.08, 0.12, 0.45, 5);
+  stem.translate(0, 0.22, 0);
+  parts.push(stem);
+  for (let i = 0; i < 5; i++) {
+    const plate = new THREE.BoxGeometry(0.08, 0.78, 0.46);
+    const a = -0.9 + (i / 4) * 1.8;
+    plate.translate(0, 0.55, 0);
+    plate.rotateY(a);
+    plate.translate(Math.sin(a) * 0.16, 0.38, Math.cos(a) * 0.05);
+    parts.push(plate);
+  }
+  return merge(parts);
+}
+
+function plankGeo() {
+  const board = new THREE.BoxGeometry(1.55, 0.14, 0.46);
+  board.translate(0, 0.12, 0);
+  const parts = [board];
+  for (let i = 0; i < 4; i++) {
+    const barn = new THREE.SphereGeometry(0.11, 5, 4);
+    barn.translate(-0.52 + i * 0.34, 0.24, (i % 2) * 0.14 - 0.07);
+    parts.push(barn);
+  }
+  return merge(parts);
+}
+
+function scrapGeo() {
+  const a = new THREE.BoxGeometry(0.95, 0.16, 0.36);
+  a.translate(0, 0.16, 0);
+  a.rotateY(0.4);
+  const b = new THREE.BoxGeometry(0.58, 0.14, 0.28);
+  b.translate(0.38, 0.3, 0.1);
+  b.rotateZ(0.65);
+  const c = new THREE.BoxGeometry(0.32, 0.32, 0.22);
+  c.translate(-0.32, 0.24, -0.06);
+  return merge([a, b, c]);
+}
+
+function wormGeo() {
+  const parts = [];
+  for (let i = 0; i < 5; i++) {
+    const h = 0.75 + (i % 3) * 0.38;
+    const tube = new THREE.CylinderGeometry(0.07, 0.11, h, 5);
+    const a = (i / 5) * Math.PI * 2;
+    tube.translate(Math.sin(a) * 0.24, h / 2, Math.cos(a) * 0.24);
+    parts.push(tube);
+    const tip = new THREE.SphereGeometry(0.11, 5, 4);
+    tip.translate(Math.sin(a) * 0.24, h + 0.02, Math.cos(a) * 0.24);
+    parts.push(tip);
+  }
+  return merge(parts);
+}
+
+const EMISSIVE = {
+  deep: [0x1ad0ff, 0.85],
+  worm: [0x1ad0ff, 0.85],
+  pearl: [0x665533, 0.25],
+  anemone: [0x661133, 0.4],
+  fanCoral: [0x552233, 0.22],
+  scrap: [0x3a1208, 0.18],
+};
+
 function buildGeometries() {
   return {
     seaweed: seaweedGeo(1.7, 0.16, 4, 0.16, 0.45),
@@ -373,8 +456,13 @@ function buildGeometries() {
     giantKelp: seaweedGeo(4.1, 0.32, 6, 0.32, 0.28),
     coral: coralGeo(1, 5),
     bigCoral: coralGeo(1.45, 7),
+    anemone: anemoneGeo(),
+    fanCoral: fanCoralGeo(),
     shell: shellGeo(),
     pearl: pearlGeo(),
+    plank: plankGeo(),
+    scrap: scrapGeo(),
     deep: deepGeo(),
+    worm: wormGeo(),
   };
 }

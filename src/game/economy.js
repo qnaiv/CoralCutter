@@ -153,7 +153,20 @@ const BASE_NEXT = {
   5: '次: 納品 +1',
 };
 
-const PROCESS_IDS = new Set(['kelp', 'giantKelp', 'coral', 'bigCoral', 'shell', 'pearl', 'deep']);
+const PROCESS_IDS = new Set([
+  'kelp',
+  'giantKelp',
+  'coral',
+  'bigCoral',
+  'anemone',
+  'fanCoral',
+  'shell',
+  'pearl',
+  'plank',
+  'scrap',
+  'deep',
+  'worm',
+]);
 const PROCESS_MULT = [1, 1.15, 1.35, 1.6];
 const VACUUM_RADIUS = [0, 2.2, 3.2, 4.4];
 const DRONE = [
@@ -214,6 +227,28 @@ export const ECONOMY = {
       clusterSize: 4,
       clusterRadius: 8,
     },
+    anemone: {
+      value: 44,
+      count: 32,
+      respawn: 15,
+      rMin: 185,
+      rMax: 268,
+      minDist: 3.6,
+      clusters: 8,
+      clusterSize: 4,
+      clusterRadius: 8,
+    },
+    fanCoral: {
+      value: 64,
+      count: 24,
+      respawn: 16,
+      rMin: 195,
+      rMax: 268,
+      minDist: 4,
+      clusters: 6,
+      clusterSize: 4,
+      clusterRadius: 8,
+    },
     shell: {
       value: 180,
       count: 42,
@@ -224,6 +259,24 @@ export const ECONOMY = {
       clusterRadius: 7,
     },
     pearl: { value: 340, count: 16, respawn: 18, minDist: 3.4, rare: true },
+    plank: {
+      value: 86,
+      count: 16,
+      respawn: 18,
+      minDist: 3.1,
+      clusters: 4,
+      clusterSize: 4,
+      clusterRadius: 6,
+    },
+    scrap: {
+      value: 70,
+      count: 20,
+      respawn: 16,
+      minDist: 2.9,
+      clusters: 4,
+      clusterSize: 5,
+      clusterRadius: 6,
+    },
     deep: {
       value: 620,
       count: 96,
@@ -235,7 +288,91 @@ export const ECONOMY = {
       clusterSize: 6,
       clusterRadius: 8.5,
     },
+    worm: {
+      value: 170,
+      count: 28,
+      respawn: 22,
+      rMin: 288,
+      rMax: 385,
+      minDist: 4.2,
+      clusters: 7,
+      clusterSize: 4,
+      clusterRadius: 8,
+    },
   },
+};
+
+/**
+ * Variety payouts. Pickups stay under the plants around them. Fish pay more
+ * because they flee. Tows are one haul back to the main base, not a zone skip.
+ * Spots sit inside the zone that gate actually opens.
+ */
+export const ACTIVITIES = {
+  pickups: [
+    { id: 'starfish', name: 'ヒトデ', value: 4, count: 28, respawn: 13, region: 'shallow' },
+    { id: 'sandShell', name: '砂の貝', value: 8, count: 22, respawn: 13, region: 'shallow' },
+    { id: 'grape', name: '海ぶどう', value: 14, count: 24, respawn: 14, region: 'kelp' },
+    { id: 'crystal', name: '結晶', value: 36, count: 18, respawn: 14, region: 'deep' },
+  ],
+  fixedPickups: [
+    { type: 'starfish', x: 18, z: -32 },
+    { type: 'starfish', x: 24, z: -28 },
+    { type: 'starfish', x: 16, z: -40 },
+    { type: 'starfish', x: 32, z: -36 },
+    { type: 'sandShell', x: 12, z: -34 },
+    { type: 'grape', x: 92, z: -58 },
+    { type: 'grape', x: 104, z: -70 },
+  ],
+  fish: [
+    { name: 'タイ', x: 22, z: -34, value: 24, color: 0xffb03a, homeR: 7, demo: true },
+    { name: 'タイ', x: 30, z: -42, value: 24, color: 0xffd15a, homeR: 6, demo: true },
+    { name: 'タイ', x: -40, z: 24, value: 24, color: 0xff8a3a, homeR: 8 },
+    { name: 'タイ', x: 48, z: 36, value: 24, color: 0xffe07a, homeR: 8 },
+    { name: 'ハマチ', x: 100, z: -80, value: 40, color: 0x3dce7a, homeR: 11 },
+    { name: 'ハマチ', x: -80, z: 90, value: 40, color: 0x2eaf62, homeR: 11 },
+    { name: 'ハマチ', x: 40, z: 130, value: 40, color: 0x49d98a, homeR: 11 },
+    { name: 'イトヒキ', x: -140, z: -170, value: 70, color: 0xff6b9a, homeR: 12 },
+    { name: 'イトヒキ', x: 180, z: -160, value: 70, color: 0xff8a5b, homeR: 12 },
+    { name: 'イトヒキ', x: 60, z: -210, value: 70, color: 0xff9a6a, homeR: 12 },
+    { name: 'スズキ', x: 190, z: -100, value: 90, color: 0xf4e2c4, homeR: 10 },
+    { name: 'アンコウ', x: 58, z: -292, value: 140, color: 0x7af6ff, homeR: 12 },
+    { name: 'アンコウ', x: -50, z: -290, value: 140, color: 0xb07bff, homeR: 12 },
+    { name: 'アンコウ', x: 90, z: -360, value: 160, color: 0x9ad0ff, homeR: 14 },
+  ],
+  clams: [
+    { name: '大貝', x: 28, z: -38, hardness: 1, value: 110, phase: Math.PI / 2, respawn: 18, demo: true },
+    { name: '大貝', x: -46, z: 32, hardness: 1, value: 110, phase: 0.6, respawn: 18 },
+    { name: '大貝', x: 96, z: -72, hardness: 2, value: 150, phase: 1.1, respawn: 20 },
+    { name: '大貝', x: -150, z: -155, hardness: 3, value: 220, phase: 1.4, respawn: 20 },
+    { name: '大貝', x: 232, z: -150, hardness: 4, value: 280, phase: 2.2, respawn: 22 },
+    { name: '大貝', x: 36, z: -300, hardness: 5, value: 360, phase: 0.9, respawn: 22 },
+    { name: '大貝', x: -80, z: -360, hardness: 5, value: 420, phase: 2.4, respawn: 24 },
+  ],
+  digs: [
+    { name: '埋蔵金', x: 16, z: -30, value: 36, color: 0xffd36a, respawn: 22, demo: true },
+    { name: '埋蔵金', x: -22, z: 28, value: 36, color: 0xffd36a, respawn: 22 },
+    { name: '埋蔵金', x: 70, z: -110, value: 80, color: 0xffc83d, respawn: 24 },
+    { name: '埋蔵金', x: -100, z: 70, value: 80, color: 0xffc83d, respawn: 24 },
+    { name: '埋蔵金', x: -170, z: -120, value: 160, color: 0xffb03a, respawn: 26 },
+    { name: '埋蔵金', x: 160, z: 150, value: 160, color: 0xffb03a, respawn: 26 },
+    { name: '深海の遺物', x: -24, z: -310, value: 260, color: 0x7af6ff, respawn: 28 },
+    { name: '深海の遺物', x: 120, z: -350, value: 340, color: 0x7af6ff, respawn: 30 },
+  ],
+  tows: [
+    { name: '沈んだ箱', kind: 'crate', x: 88, z: -64, payout: 220, drag: 0.72, respawn: 55, demo: true },
+    { name: '石像', kind: 'statue', x: -130, z: -180, payout: 420, drag: 0.62, respawn: 60 },
+    { name: '錨', kind: 'anchor', x: 236, z: -156, payout: 520, drag: 0.54, respawn: 65 },
+    { name: '石板', kind: 'tablet', x: -16, z: -318, payout: 780, drag: 0.6, respawn: 70 },
+    { name: '石板', kind: 'tablet', x: 70, z: -370, payout: 960, drag: 0.58, respawn: 75 },
+  ],
+  /** Big targets. Pickup placement stays off these. */
+  avoid: [
+    { x: 0, z: -52, r: 4.6 },
+    { x: 78, z: -108, r: 4.6 },
+    { x: -120, z: -190, r: 4.8 },
+    { x: 226, z: -138, r: 4.6 },
+    { x: 24, z: -312, r: 4.8 },
+  ],
 };
 
 export const FACILITIES = [
