@@ -443,6 +443,23 @@ h1 {
   #move-hint { bottom: 12px; }
 }
 
+@media (max-width: 859px) and (orientation: portrait) {
+  .dock { width: min(168px, 44vw); gap: 4px; }
+  #minimap { width: 64px; height: 64px; }
+  .tank-card { padding: 6px 8px 7px; }
+  .tank-bar { height: 7px; margin-top: 4px; }
+  #zone-pill { margin-bottom: 2px; }
+  #upgrade {
+    max-height: 26dvh;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+  }
+  .upgrade-title { margin-bottom: 4px; font-size: 14px; }
+  #upgrade-cards { gap: 6px; }
+  .card { min-width: 142px; padding: 6px; }
+  .card button { margin-top: 4px; padding: 5px 8px; font-size: 13px; }
+  #hud.at-base .dock { bottom: calc(104px + env(safe-area-inset-bottom)); }
+}
+
 @media (max-width: 859px) and (orientation: landscape) {
   #hud.at-base .dock { bottom: calc(120px + env(safe-area-inset-bottom)); }
 }
