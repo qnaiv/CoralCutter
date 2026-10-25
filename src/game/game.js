@@ -24,6 +24,7 @@ import { Input } from './input.js';
 import { clamp, damp, smoothstep } from './math.js';
 import { Player } from './player.js';
 import { Resources } from './resources.js';
+import { BigTargets } from './targets.js';
 import { clearSave, loadSave, writeSave } from './save.js';
 import { zoneAt } from './terrain.js';
 import { UI } from './ui.js';
@@ -88,6 +89,8 @@ export class Game {
 
     this.world = new World(this.scene);
     this.resources = new Resources(this.scene);
+    this.targets = new BigTargets(this.scene);
+    this.world.colliders.push(...this.targets.colliders());
     this.player = new Player(this.scene);
     this.fx = new FX(this.scene);
     this.audio = new AudioBus();
@@ -242,13 +245,25 @@ export class Game {
     this.tank.pieces.push(entity.colorHex);
     if (this.tank.pieces.length > 36) this.tank.pieces.shift();
     this.stats.cut += 1;
-    const big = entity.maxHp >= 40;
-    if (big) this.audio.shatter();
-    else this.audio.cut();
-    this.fx.chunks(entity.x, entity.y + 0.7, entity.z, entity.colorHex, big ? 6 : 3);
-    if (big) {
-      this.shake = Math.max(this.shake, 0.3);
-      buzz(14);
+    if (entity.prize) {
+      for (let i = 0; i < 8; i++) this.tank.pieces.push(entity.colorHex);
+      if (this.tank.pieces.length > 36) this.tank.pieces.splice(0, this.tank.pieces.length - 36);
+      this.audio.shatter();
+      this.fx.chunks(entity.x, entity.y + 1.2, entity.z, entity.colorHex, 12);
+      this.fx.coins(entity.x, entity.y + 1.4, entity.z);
+      this.fx.bubbles(entity.x, entity.y + 0.6, entity.z, 16);
+      this.shake = Math.max(this.shake, 0.62);
+      this.ui.toast(`${entity.name} +${gain.toLocaleString('ja-JP')}`, 'good');
+      buzz(30);
+    } else {
+      const big = entity.maxHp >= 40;
+      if (big) this.audio.shatter();
+      else this.audio.cut();
+      this.fx.chunks(entity.x, entity.y + 0.7, entity.z, entity.colorHex, big ? 6 : 3);
+      if (big) {
+        this.shake = Math.max(this.shake, 0.3);
+        buzz(14);
+      }
     }
     const cap = tankCapacity(this.levels.tank);
     if (this.tank.cargo >= cap && !this.tank.warned) {
@@ -371,6 +386,7 @@ export class Game {
       this.frameCutMode = 'idle';
       const cpos = this.player.getCutterXZ();
       this.resources.harvestAround(cpos.x, cpos.z, cutter.range, cutter.damage, cutter.power, this.harvest);
+      this.targets.harvestAround(cpos.x, cpos.z, cutter.range, cutter.damage, cutter.power, this.harvest);
       if (features.autoVacuum && features.vacuumRadius > 0) {
         this.resources.harvestAround(
           this.player.x,
@@ -396,6 +412,11 @@ export class Game {
     }
 
     this.resources.update(dt, this.time);
+    this.targets.update(dt, this.time, {
+      x: this.player.x,
+      z: this.player.z,
+      power: cutter.power,
+    });
     const dist = Math.hypot(this.player.x, this.player.z);
     const cap = tankCapacity(this.levels.tank);
     this.world.update(dt, this.time, {
