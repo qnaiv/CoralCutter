@@ -142,6 +142,15 @@ export const PRICE_LEVELS = [
 ];
 export const PRICE_COSTS = [280, 410, 610, 900, 1330, 1970, 2920];
 
+/**
+ * Optional theft reduction. Only matters once cargo is worth stealing,
+ * in the deep and at the wreck. Costs sit with the early depth gates
+ * so a deep run can buy one without replacing the cutter or depth curve.
+ * Level 1 keeps nothing.
+ */
+export const DECOY_LEVELS = [{ keep: 0 }, { keep: 0.3 }, { keep: 0.5 }, { keep: 0.68 }];
+export const DECOY_COSTS = [420, 980, 1900];
+
 export const BASE_MAX = 6;
 /** Cost to leave levels 1..5. Mid-game sinks, not the first purchase. */
 const BASE_COSTS = [450, 1100, 2500, 5200, 9800];

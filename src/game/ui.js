@@ -265,6 +265,7 @@ export class UI {
       state.outposts?.length ?? 0,
       state.outpostCap,
       state.warpCd > 0 ? Math.ceil(state.warpCd) : 0,
+      state.decoyLevel,
     ].join('|');
     if (key !== this.cardKey) {
       this.cardKey = key;
@@ -293,6 +294,7 @@ export class UI {
       tank: state.tankLevel,
       propeller: state.propLevel,
       price: state.priceLevel,
+      decoy: state.decoyLevel || 1,
     };
     let recommend = null;
     for (const def of UPGRADES) {
@@ -564,6 +566,13 @@ export class UI {
         c.fillStyle = '#ffb020';
         c.fillRect(mx - 3, my - 3, 6, 6);
       }
+    }
+    if (state.threat) {
+      const [mx, my] = plot(state.threat.x, state.threat.z);
+      c.fillStyle = state.threat.hot ? '#ff4b3a' : '#ffb089';
+      c.beginPath();
+      c.arc(mx, my, state.threat.hot ? 4.5 : 3, 0, Math.PI * 2);
+      c.fill();
     }
     const [bx, by] = plot(0, 0);
     c.fillStyle = '#ffe56a';

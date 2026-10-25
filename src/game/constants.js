@@ -1,6 +1,8 @@
 import {
   CUTTER_COSTS,
   CUTTER_LEVELS,
+  DECOY_COSTS,
+  DECOY_LEVELS,
   DEPTH_COSTS,
   DEPTH_LEVELS,
   ECONOMY,
@@ -22,6 +24,8 @@ import { formatNum } from './math.js';
 export {
   CUTTER_COSTS,
   CUTTER_LEVELS,
+  DECOY_COSTS,
+  DECOY_LEVELS,
   DEPTH_COSTS,
   DEPTH_LEVELS,
   LANDMARKS,
@@ -136,6 +140,22 @@ export const UPGRADES = [
     next: (level) => {
       const n = PRICE_LEVELS[level];
       return n ? `次: ×${n.mult.toFixed(2)}` : '最大まで強化済み';
+    },
+  },
+  {
+    id: 'decoy',
+    name: 'デコイ',
+    blurb: '奪われる量を減らす',
+    color: '#7ad7ff',
+    max: DECOY_LEVELS.length,
+    cost: (level) => DECOY_COSTS[level - 1] ?? null,
+    stat: (level) => {
+      const keep = DECOY_LEVELS[level - 1].keep;
+      return keep ? `軽減 ${Math.round(keep * 100)}%` : 'なし';
+    },
+    next: (level) => {
+      const n = DECOY_LEVELS[level];
+      return n ? `次: 軽減 ${Math.round(n.keep * 100)}%` : '最大まで強化済み';
     },
   },
 ];
@@ -411,6 +431,11 @@ export function propSpeed(level) {
 
 export function priceMult(level) {
   return PRICE_LEVELS[Math.max(0, Math.min(PRICE_LEVELS.length, level) - 1)].mult;
+}
+
+export function decoyKeep(level) {
+  const index = Math.max(0, Math.min(DECOY_LEVELS.length, level) - 1);
+  return DECOY_LEVELS[index].keep;
 }
 
 export function padPosition(pad) {
