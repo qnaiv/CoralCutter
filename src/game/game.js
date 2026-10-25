@@ -95,6 +95,7 @@ export class Game {
     this.fx = new FX(this.scene);
     this.audio = new AudioBus();
     this.audio.setMuted(this.save.mute);
+    this.audio.setLevels(this.save.bgm / 100, this.save.se / 100);
     this.audio.setZone(this.zone.id);
     this.input = new Input();
     this.input.unlock = () => this.audio.unlock();
@@ -113,6 +114,12 @@ export class Game {
     this.ui.onUi = () => {
       this.audio.unlock();
       this.audio.playSfx('ui');
+    };
+    this.ui.setVolumes(this.save.bgm, this.save.se);
+    this.ui.onVolumes = (bgm, se) => {
+      this.audio.unlock();
+      this.audio.setLevels(bgm / 100, se / 100);
+      this.persist();
     };
     this.ui.muteBtn.textContent = this.audio.muted ? '音OFF' : '音ON';
     this.harvest = {
@@ -159,6 +166,8 @@ export class Game {
       levels: { ...this.levels },
       stats: { ...this.stats },
       mute: this.audio.muted,
+      bgm: Math.round(this.audio.bgm * 100),
+      se: Math.round(this.audio.se * 100),
       viewZoom: this.viewZoom,
     };
   }
