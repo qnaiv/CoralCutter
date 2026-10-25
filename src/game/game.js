@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { Activities } from './activities.js';
 import { AudioBus } from './audio.js';
 import {
   CUTTER_LEVELS,
@@ -60,6 +61,7 @@ export class Game {
     this.statusHint = '';
     this.statusUntil = 0;
     this.fullHintAt = -10;
+    this.closedHintAt = -10;
     this.shake = 0;
     this.frameCutMode = 'idle';
     this.bubbleAcc = 0;
@@ -89,6 +91,7 @@ export class Game {
 
     this.world = new World(this.scene);
     this.resources = new Resources(this.scene);
+    this.activities = new Activities(this.scene);
     this.targets = new BigTargets(this.scene);
     this.world.colliders.push(...this.targets.colliders());
     this.player = new Player(this.scene);
@@ -307,7 +310,64 @@ export class Game {
     }
   }
 
+  onLoot(item, opts = {}) {
+    if (!this.harvest.canTake(item.cargo)) {
+      this.onReject(item, 'full');
+      return false;
+    }
+    if (opts.contact) this.registerContact(opts.contact);
+    if (this.time - this.comboTime < 0.7) this.combo += 1;
+    else this.combo = 1;
+    this.comboTime = this.time;
+    if (this.combo > this.stats.bestCombo) this.stats.bestCombo = this.combo;
+    const bonus = Math.min(0.3, Math.max(0, this.combo - 1) * 0.03);
+    const gain = Math.round(item.value * (1 + bonus));
+    this.tank.cargo += item.cargo;
+    this.tank.value += gain;
+    this.tank.pieces.push(item.colorHex);
+    if (this.tank.pieces.length > 36) this.tank.pieces.shift();
+    this.stats.cut += 1;
+    this.audio.playSfx(opts.sfx || 'pickup');
+    this.fx.chunks(item.x, (item.y || 0) + 0.45, item.z, item.colorHex, opts.chunks ?? 3);
+    if (opts.bubbles) this.fx.bubbles(item.x, (item.y || 0) + 0.4, item.z, opts.bubbles);
+    if (opts.toast) this.ui.toast(`${item.name} +${gain.toLocaleString('ja-JP')}`, 'good');
+    if (opts.shake) this.shake = Math.max(this.shake, opts.shake);
+    if (opts.buzz) buzz(opts.buzz);
+    const cap = tankCapacity(this.levels.tank);
+    if (this.tank.cargo >= cap && !this.tank.warned) {
+      this.tank.warned = true;
+      this.ui.toast('タンクが満タン！基地に戻ろう', 'info');
+      this.audio.playSfx('full');
+    }
+    return true;
+  }
+
+  onTowSold(tow) {
+    const payout = Math.max(1, Math.round(tow.payout * priceMult(this.levels.price)));
+    this.money += payout;
+    this.stats.earned += payout;
+    this.ui.toast(`${tow.name}を売却 +${payout.toLocaleString('ja-JP')}`, 'good');
+    this.ui.bumpMoney();
+    this.audio.playSfx('sell');
+    this.fx.coins(tow.x, 1.2, tow.z);
+    this.fx.bubbles(this.player.x, 0.6, this.player.z, 8);
+    this.world.pulseSell();
+    this.shake = Math.max(this.shake, 0.4);
+    buzz(22);
+    this.persist();
+  }
+
   onReject(entity, reason) {
+    if (reason === 'closed') {
+      this.registerContact('clank');
+      this.audio.playSfx('bonk');
+      this.fx.sparks(entity.x, (entity.y || 0) + 0.45, entity.z);
+      if (this.time > this.closedHintAt + 1.2) {
+        this.closedHintAt = this.time;
+        this.ui.toast('貝は閉じている', 'info');
+      }
+      return;
+    }
     if (reason === 'hard') {
       this.registerContact('clank');
       this.audio.playSfx('clank');
@@ -341,7 +401,7 @@ export class Game {
 
   onEnterSell() {
     if (this.tank.cargo <= 0) {
-      if (!this.emptyHintShown && this.stats.cut === 0) {
+      if (!this.emptyHintShown && this.stats.cut === 0 && !this.activities.hooked) {
         this.emptyHintShown = true;
         this.ui.toast('海藻を刈ってから、この円に戻ると売れる', 'info');
       }
@@ -408,7 +468,7 @@ export class Game {
     if (this.started) this.playTime += dt;
     const axis = this.started ? this.input.axis() : null;
     const move = this.started ? this.computeMove(axis) : this._move.set(0, 0, 0);
-    const speed = propSpeed(this.levels.propeller);
+    const speed = propSpeed(this.levels.propeller) * this.activities.drag;
     const cutter = cutterStats(this.levels.cutter);
     this.player.cutMode = this.frameCutMode;
     this.player.update(dt, move, speed, this.world.colliders, cutter.range);
@@ -454,6 +514,18 @@ export class Game {
     }
 
     this.resources.update(dt, this.time);
+    this.activities.update(dt, this.time, {
+      started: this.started,
+      player: this.player,
+      cutter,
+      canTake: this.harvest.canTake,
+      onLoot: (item, opts) => this.onLoot(item, opts),
+      onReject: (entity, reason) => this.onReject(entity, reason),
+      onTowSold: (tow) => this.onTowSold(tow),
+      audio: this.audio,
+      fx: this.fx,
+      toast: (text, kind) => this.ui.toast(text, kind),
+    });
     this.targets.update(dt, this.time, {
       x: this.player.x,
       z: this.player.z,
