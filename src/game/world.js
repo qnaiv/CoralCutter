@@ -9,10 +9,12 @@ import {
   ZONE_RINGS,
   padPosition,
 } from './constants.js';
-import { mulberry32 } from './math.js';
+import { mulberry32, smoothstep } from './math.js';
 import { groundHeight, inWreck, terrainColor } from './terrain.js';
 
 const LABEL_FONT = '"M PLUS Rounded 1c", "WenQuanYi Micro Hei", "Droid Sans Fallback", sans-serif';
+/** Fixed world size. Do not grow this on portrait or with zoom. */
+const LABEL_SCALE = 2.35;
 
 export class World {
   constructor(scene) {
@@ -178,20 +180,20 @@ export class World {
       this.signDefs.push({
         text: pad.label,
         x: p.x,
-        y: 2.35,
+        y: 1.45,
         z: p.z,
         bg: 'rgba(4, 24, 36, 0.78)',
         fg: '#ffffff',
-        scale: 4.2,
+        scale: LABEL_SCALE,
       });
     }
 
     this.signDefs.push(
-      { text: '売却', x: 0, y: 2.6, z: 0, bg: 'rgba(8, 60, 68, 0.82)', fg: '#d9fff6', scale: 5.4 },
-      { text: '昆布の森', x: 0, y: 3.1, z: -49, bg: 'rgba(12, 48, 28, 0.8)', fg: '#d8ffc8', scale: 7 },
-      { text: 'サンゴ礁', x: 0, y: 3.2, z: -104, bg: 'rgba(70, 24, 36, 0.8)', fg: '#ffd5e0', scale: 7 },
-      { text: '深海', x: 0, y: 3.4, z: -158, bg: 'rgba(8, 24, 48, 0.82)', fg: '#d5f2ff', scale: 6.2 },
-      { text: '沈没船', x: WRECK.x, y: 5.5, z: WRECK.z, bg: 'rgba(48, 32, 16, 0.82)', fg: '#ffe7bf', scale: 7 },
+      { text: '売却', x: 0, y: 1.15, z: 0, bg: 'rgba(8, 60, 68, 0.82)', fg: '#d9fff6', scale: LABEL_SCALE },
+      { text: '昆布の森', x: 0, y: 2.2, z: -49, bg: 'rgba(12, 48, 28, 0.8)', fg: '#d8ffc8', scale: LABEL_SCALE },
+      { text: 'サンゴ礁', x: 0, y: 2.2, z: -104, bg: 'rgba(70, 24, 36, 0.8)', fg: '#ffd5e0', scale: LABEL_SCALE },
+      { text: '深海', x: 0, y: 2.4, z: -158, bg: 'rgba(8, 24, 48, 0.82)', fg: '#d5f2ff', scale: LABEL_SCALE },
+      { text: '沈没船', x: WRECK.x, y: 3.2, z: WRECK.z, bg: 'rgba(48, 32, 16, 0.82)', fg: '#ffe7bf', scale: LABEL_SCALE },
     );
 
     for (const ring of ZONE_RINGS) {
@@ -459,14 +461,11 @@ export class World {
       icon.position.y = 1.35 + Math.sin(time * 2 + i) * 0.1;
       icon.rotation.y = time * 0.6;
     }
-    const mark = state.indicatorScale || 1;
     for (const sign of this.signs) {
-      sign.position.y = sign.userData.baseY + Math.sin(time * 1.6 + sign.position.x) * 0.08;
-      if (sign.userData.baseSX) {
-        sign.scale.set(sign.userData.baseSX * mark, sign.userData.baseSY * mark, 1);
-      }
+      sign.position.y = sign.userData.baseY + Math.sin(time * 1.6 + sign.position.x) * 0.04;
+      const near = Math.hypot(state.x - sign.position.x, state.z - sign.position.z);
+      sign.material.opacity = smoothstep(3.4, 7.4, near);
     }
-    for (const icon of this.padIcons) icon.scale.setScalar(mark);
 
     for (const fish of this.fish) {
       fish.age += dt;
@@ -499,16 +498,15 @@ export class World {
 
     if (state.showArrow && state.dist > 8) {
       const ang = Math.atan2(-state.x, -state.z);
-      const mark = state.indicatorScale || 1;
-      const ahead = 3.3 * mark;
+      const ahead = 2.7;
       const ax = state.x + Math.sin(ang) * ahead;
       const az = state.z + Math.cos(ang) * ahead;
       this.arrow.visible = true;
-      this.arrow.position.set(ax, groundHeight(ax, az) + 0.25, az);
+      this.arrow.position.set(ax, groundHeight(ax, az) + 0.2, az);
       // Shape tip is -Z after rotateX(-90°). Flip so it points along +Z at yaw 0,
       // then yaw toward the base (atan2 matches the sub's facing).
       this.arrow.rotation.y = ang + Math.PI;
-      const s = (1.15 + Math.sin(time * 6) * 0.08) * mark;
+      const s = 0.72 + Math.sin(time * 6) * 0.05;
       this.arrow.scale.setScalar(s);
     } else {
       this.arrow.visible = false;
@@ -600,9 +598,16 @@ function makeLabel(text, bg, fg, scale) {
   ctx.fillText(text, 256, 66);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+  const mat = new THREE.SpriteMaterial({
+    map: tex,
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+  });
   const sprite = new THREE.Sprite(mat);
   const aspect = 512 / 128;
   sprite.scale.set(scale * aspect * 0.42, scale * 0.42, 1);
+  sprite.center.set(0.5, 1);
+  sprite.renderOrder = 1;
   return sprite;
 }
