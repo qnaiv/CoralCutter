@@ -1,14 +1,54 @@
+import {
+  CUTTER_COSTS,
+  CUTTER_LEVELS,
+  DECOY_COSTS,
+  DECOY_LEVELS,
+  DEPTH_COSTS,
+  DEPTH_LEVELS,
+  ECONOMY,
+  LANDMARKS,
+  POWER_NEED,
+  PRICE_COSTS,
+  PRICE_LEVELS,
+  PROP_COSTS,
+  PROP_LEVELS,
+  TANK_COSTS,
+  TANK_LEVELS,
+  WORLD,
+  WRECK_SITE,
+  ZONE_RING_DEFS,
+  objectiveFor as objectiveLine,
+} from './economy.js';
 import { formatNum } from './math.js';
+
+export {
+  CUTTER_COSTS,
+  CUTTER_LEVELS,
+  DECOY_COSTS,
+  DECOY_LEVELS,
+  DEPTH_COSTS,
+  DEPTH_LEVELS,
+  LANDMARKS,
+  POWER_NEED,
+  PRICE_COSTS,
+  PRICE_LEVELS,
+  PROP_COSTS,
+  PROP_LEVELS,
+  TANK_COSTS,
+  TANK_LEVELS,
+  WORLD,
+};
 
 export const SAVE_KEY = 'coral-cutter-save-v1';
 
 export const SELL_RADIUS = 6;
 export const BASE_RADIUS = 13.2;
 export const UPGRADE_RADIUS = 12.4;
-export const WORLD_LIMIT = 232;
+export const WORLD_LIMIT = WORLD.limit;
+export const MAP_VIEW = WORLD.mapView;
 export const PAD_DIST = 8.8;
 
-export const WRECK = { x: 126, z: -82, radius: 26 };
+export const WRECK = WRECK_SITE;
 
 export const BEACON = { angle: Math.PI, dist: 11.15 };
 
@@ -21,55 +61,7 @@ export const ZONES = {
   wreck: { id: 'wreck', name: '沈没船', rank: 5, enter: '沈没船を見つけた' },
 };
 
-export const ZONE_RINGS = [
-  { radius: 48, color: 0xb6f0a0 },
-  { radius: 102, color: 0xff9eb8 },
-  { radius: 156, color: 0x8fd4ff },
-];
-
-/** Cutter level required to damage a given hardness. */
-export const POWER_NEED = { 1: 1, 2: 2, 3: 4, 4: 6, 5: 8 };
-
-export const CUTTER_LEVELS = [
-  { damage: 14, range: 2.95, power: 1 },
-  { damage: 26, range: 3.25, power: 2, shout: '昆布を切断できるようになった！' },
-  { damage: 74, range: 3.55, power: 2, shout: '巨大昆布を一気にまとめて切れる！' },
-  { damage: 96, range: 3.95, power: 3, shout: 'サンゴを切断できるようになった！' },
-  { damage: 240, range: 4.35, power: 3, shout: '大サンゴを粉砕できる！' },
-  { damage: 260, range: 4.8, power: 4, shout: '沈没船の貝殻を切断できるようになった！' },
-  { damage: 430, range: 5.15, power: 4, shout: '真珠を割り切れる！' },
-  { damage: 520, range: 5.6, power: 5, shout: '深海サンゴを切断できるようになった！' },
-];
-
-export const CUTTER_COSTS = [50, 140, 300, 640, 1300, 2400, 4200];
-
-export const TANK_LEVELS = [
-  { capacity: 16 },
-  { capacity: 26 },
-  { capacity: 40 },
-  { capacity: 58 },
-  { capacity: 82 },
-  { capacity: 112 },
-];
-export const TANK_COSTS = [40, 120, 280, 560, 1100];
-
-export const PROP_LEVELS = [
-  { speed: 13 },
-  { speed: 16 },
-  { speed: 19 },
-  { speed: 22.5 },
-  { speed: 26 },
-];
-export const PROP_COSTS = [45, 130, 300, 640];
-
-export const PRICE_LEVELS = [
-  { mult: 1 },
-  { mult: 1.35 },
-  { mult: 1.8 },
-  { mult: 2.35 },
-  { mult: 3 },
-];
-export const PRICE_COSTS = [80, 200, 460, 980];
+export const ZONE_RINGS = ZONE_RING_DEFS;
 
 export const PADS = [
   { id: 'cutter', label: 'カッター', angle: 0.62, color: '#ff5a3c' },
@@ -95,6 +87,20 @@ export const UPGRADES = [
       if (!n) return '最大まで強化済み';
       if (n.shout) return `次: ${n.shout.replace('！', '')}`;
       return `次: 威力 ${n.damage}`;
+    },
+  },
+  {
+    id: 'depth',
+    name: '深度',
+    blurb: '進める海域',
+    color: '#7ecbff',
+    max: DEPTH_LEVELS.length,
+    cost: (level) => DEPTH_COSTS[level - 1] ?? null,
+    stat: (level) => DEPTH_LEVELS[level - 1].reach,
+    next: (level) => {
+      const n = DEPTH_LEVELS[level];
+      if (!n) return '最大まで強化済み';
+      return `次: ${n.reach}（カッターLv${n.cutter}）`;
     },
   },
   {
@@ -136,9 +142,25 @@ export const UPGRADES = [
       return n ? `次: ×${n.mult.toFixed(2)}` : '最大まで強化済み';
     },
   },
+  {
+    id: 'decoy',
+    name: 'デコイ',
+    blurb: '奪われる量を減らす',
+    color: '#7ad7ff',
+    max: DECOY_LEVELS.length,
+    cost: (level) => DECOY_COSTS[level - 1] ?? null,
+    stat: (level) => {
+      const keep = DECOY_LEVELS[level - 1].keep;
+      return keep ? `軽減 ${Math.round(keep * 100)}%` : 'なし';
+    },
+    next: (level) => {
+      const n = DECOY_LEVELS[level];
+      return n ? `次: 軽減 ${Math.round(n.keep * 100)}%` : '最大まで強化済み';
+    },
+  },
 ];
 
-export const RESOURCE_TYPES = [
+const RESOURCE_TYPES_BASE = [
   {
     id: 'giantKelp',
     name: '巨大昆布',
@@ -388,6 +410,13 @@ export const RESOURCE_TYPES = [
   },
 ];
 
+function tunedResource(type) {
+  const extra = ECONOMY.resources[type.id];
+  return extra ? { ...type, ...extra } : type;
+}
+
+export const RESOURCE_TYPES = RESOURCE_TYPES_BASE.map(tunedResource);
+
 export function cutterStats(level) {
   return CUTTER_LEVELS[Math.max(0, Math.min(CUTTER_LEVELS.length, level) - 1)];
 }
@@ -402,6 +431,11 @@ export function propSpeed(level) {
 
 export function priceMult(level) {
   return PRICE_LEVELS[Math.max(0, Math.min(PRICE_LEVELS.length, level) - 1)].mult;
+}
+
+export function decoyKeep(level) {
+  const index = Math.max(0, Math.min(DECOY_LEVELS.length, level) - 1);
+  return DECOY_LEVELS[index].keep;
 }
 
 export function padPosition(pad) {
@@ -425,12 +459,8 @@ export function nearestPad(x, z) {
   return best;
 }
 
-export function objectiveFor(cutterLevel) {
-  if (cutterLevel < 2) return '目標: でかい海藻を刈ってカッターLv2へ';
-  if (cutterLevel < 4) return '目標: 昆布の幹を刈ってサンゴへ';
-  if (cutterLevel < 6) return '目標: 巨大サンゴを刈って沈没船へ';
-  if (cutterLevel < 8) return '目標: 宝箱を開けて深海へ';
-  return '深海の光柱を刈れる';
+export function objectiveFor(cutterLevel, depthLevel = 1) {
+  return objectiveLine(cutterLevel, depthLevel);
 }
 
 export function canCutText(cutterLevel) {

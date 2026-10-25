@@ -2,8 +2,10 @@ import * as THREE from 'three';
 import {
   BASE_RADIUS,
   BEACON,
+  LANDMARKS,
   PADS,
   SELL_RADIUS,
+  WORLD,
   WRECK,
   WORLD_LIMIT,
   ZONE_RINGS,
@@ -34,6 +36,7 @@ export class World {
     this._buildWreck();
     this._buildRocks();
     this._buildFish();
+    this._buildLandmarks();
     this._buildArrow();
     this._buildAmbientBubbles();
     this.sellPulse = 0;
@@ -52,7 +55,7 @@ export class World {
 
   _buildGround() {
     const size = WORLD_LIMIT * 2 + 30;
-    const seg = 72;
+    const seg = 96;
     const geo = new THREE.PlaneGeometry(size, size, seg, seg);
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position;
@@ -162,6 +165,28 @@ export class World {
     this.scene.add(this.beaconLight);
     this.colliders.push({ x: beaconPos.x, z: beaconPos.z, r: 0.7 });
 
+    this.pylons = [];
+    const pylonMat = new THREE.MeshLambertMaterial({ color: 0xf4f7f8, flatShading: true });
+    const lampMat = new THREE.MeshLambertMaterial({
+      color: 0xfff1b0,
+      emissive: 0xffc83d,
+      emissiveIntensity: 0.85,
+      flatShading: true,
+    });
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + 0.4;
+      const group = new THREE.Group();
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, 3.2, 5), pylonMat);
+      post.position.y = 1.6;
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.28, 6, 5), lampMat);
+      lamp.position.y = 3.3;
+      group.add(post, lamp);
+      group.position.set(Math.sin(a) * 11.4, 0, Math.cos(a) * 11.4);
+      group.visible = false;
+      this.scene.add(group);
+      this.pylons.push(group);
+    }
+
     this.padIcons = [];
     for (const pad of PADS) {
       const p = padPosition(pad);
@@ -190,9 +215,10 @@ export class World {
 
     this.signDefs.push(
       { text: '売却', x: 0, y: 1.15, z: 0, bg: 'rgba(8, 60, 68, 0.82)', fg: '#d9fff6', scale: LABEL_SCALE },
-      { text: '昆布の森', x: 0, y: 2.2, z: -49, bg: 'rgba(12, 48, 28, 0.8)', fg: '#d8ffc8', scale: LABEL_SCALE },
-      { text: 'サンゴ礁', x: 0, y: 2.2, z: -104, bg: 'rgba(70, 24, 36, 0.8)', fg: '#ffd5e0', scale: LABEL_SCALE },
-      { text: '深海', x: 0, y: 2.4, z: -158, bg: 'rgba(8, 24, 48, 0.82)', fg: '#d5f2ff', scale: LABEL_SCALE },
+      { text: '昆布の森', x: 0, y: 2.2, z: -(WORLD.shallow + 3), bg: 'rgba(12, 48, 28, 0.8)', fg: '#d8ffc8', scale: LABEL_SCALE },
+      { text: 'サンゴ礁', x: 0, y: 2.2, z: -(WORLD.kelp + 4), bg: 'rgba(70, 24, 36, 0.8)', fg: '#ffd5e0', scale: LABEL_SCALE },
+      { text: '深海', x: 0, y: 2.4, z: -(WORLD.coral + 4), bg: 'rgba(8, 24, 48, 0.82)', fg: '#d5f2ff', scale: LABEL_SCALE },
+      { text: '深海の奥', x: 0, y: 2.4, z: -(WORLD.innerDeep + 4), bg: 'rgba(8, 18, 40, 0.82)', fg: '#e7d8ff', scale: LABEL_SCALE },
       { text: '沈没船', x: WRECK.x, y: 3.2, z: WRECK.z, bg: 'rgba(48, 32, 16, 0.82)', fg: '#ffe7bf', scale: LABEL_SCALE },
     );
 
@@ -224,6 +250,19 @@ export class World {
     wreckRing.rotation.x = -Math.PI / 2;
     wreckRing.position.set(WRECK.x, 0.5, WRECK.z);
     this.scene.add(wreckRing);
+    const edge = new THREE.Mesh(
+      new THREE.RingGeometry(WORLD_LIMIT - 1.4, WORLD_LIMIT, 96),
+      new THREE.MeshBasicMaterial({
+        color: 0x9fd8ea,
+        transparent: true,
+        opacity: 0.28,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    edge.rotation.x = -Math.PI / 2;
+    edge.position.y = 0.46;
+    this.scene.add(edge);
   }
 
   _buildWreck() {
@@ -254,9 +293,10 @@ export class World {
     group.add(cabin);
     group.position.set(WRECK.x, groundHeight(WRECK.x, WRECK.z), WRECK.z);
     group.rotation.y = 0.6;
+    group.scale.setScalar(1.35);
     this.scene.add(group);
-    this.colliders.push({ x: WRECK.x, z: WRECK.z, r: 4.2 });
-    const light = new THREE.PointLight(0xffc56a, 18, 26, 2);
+    this.colliders.push({ x: WRECK.x, z: WRECK.z, r: 5.4 });
+    const light = new THREE.PointLight(0xffc56a, 18, 36, 2);
     light.position.set(WRECK.x, 3.2, WRECK.z);
     this.scene.add(light);
   }
@@ -265,8 +305,9 @@ export class World {
     const rand = mulberry32(77);
     const spots = [];
     const specs = [
-      { count: 20, rMin: 40, rMax: 95, sMin: 0.55, sMax: 1.15 },
-      { count: 26, rMin: 100, rMax: 220, sMin: 0.9, sMax: 2.1 },
+      { count: 22, rMin: 48, rMax: 160, sMin: 0.55, sMax: 1.2 },
+      { count: 28, rMin: 170, rMax: 280, sMin: 0.9, sMax: 2.0 },
+      { count: 24, rMin: 290, rMax: 385, sMin: 1.05, sMax: 2.3 },
     ];
     for (const spec of specs) {
       let made = 0;
@@ -278,7 +319,7 @@ export class World {
         const x = Math.cos(a) * r;
         const z = Math.sin(a) * r;
         if (Math.hypot(x, z) < 18) continue;
-        if (inWreck(x, z, 10)) continue;
+        if (inWreck(x, z)) continue;
         let ok = true;
         for (const s of spots) {
           const dx = s.x - x;
@@ -309,7 +350,7 @@ export class World {
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
       const dist = Math.hypot(s.x, s.z);
-      color.set(dist > 156 ? 0x6e8ea0 : dist > 100 ? 0xc48978 : 0xd9c39a);
+      color.set(dist > WORLD.coral ? 0x6e8ea0 : dist > WORLD.kelp ? 0xc48978 : 0xd9c39a);
       mesh.setColorAt(i, color);
       this.colliders.push({ x: s.x, z: s.z, r: s.scale * 0.72 });
     }
@@ -326,7 +367,7 @@ export class World {
     const tailGeo = new THREE.ConeGeometry(0.16, 0.28, 4);
     tailGeo.rotateX(-Math.PI / 2);
     const colors = [0xffe56a, 0xff8f7a, 0x8af3ff, 0xffffff, 0xb8ff7a];
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 22; i++) {
       const mat = new THREE.MeshLambertMaterial({
         color: colors[i % colors.length],
         flatShading: true,
@@ -336,7 +377,7 @@ export class World {
       const tail = new THREE.Mesh(tailGeo, mat);
       tail.position.z = -0.42;
       group.add(body, tail);
-      const band = 30 + rand() * 150;
+      const band = 48 + rand() * 320;
       const a = rand() * Math.PI * 2;
       const fish = {
         mesh: group,
@@ -353,6 +394,55 @@ export class World {
       this.scene.add(group);
       this.fish.push(fish);
     }
+  }
+
+  _buildLandmarks() {
+    const ventGeo = new THREE.ConeGeometry(0.7, 2.2, 6);
+    ventGeo.translate(0, 1.1, 0);
+    const glowGeo = new THREE.SphereGeometry(0.42, 6, 5);
+    const ventMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
+    const glowMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const vents = new THREE.InstancedMesh(ventGeo, ventMat, LANDMARKS.length);
+    const glows = new THREE.InstancedMesh(glowGeo, glowMat, LANDMARKS.length);
+    vents.frustumCulled = false;
+    glows.frustumCulled = false;
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+    const labeled = new Set();
+    for (let i = 0; i < LANDMARKS.length; i++) {
+      const mark = LANDMARKS[i];
+      const y = groundHeight(mark.x, mark.z);
+      dummy.position.set(mark.x, y, mark.z);
+      dummy.rotation.set(0, i * 0.7, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      vents.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(mark.x, y + 2.15, mark.z);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      glows.setMatrixAt(i, dummy.matrix);
+      color.setHex(mark.color);
+      vents.setColorAt(i, color);
+      glows.setColorAt(i, color);
+      if (!labeled.has(mark.name)) {
+        labeled.add(mark.name);
+        this.signDefs.push({
+          text: mark.name,
+          x: mark.x,
+          y: y + 2.8,
+          z: mark.z,
+          bg: 'rgba(6, 24, 36, 0.78)',
+          fg: '#e9fbff',
+          scale: LABEL_SCALE,
+        });
+      }
+    }
+    vents.instanceMatrix.needsUpdate = true;
+    glows.instanceMatrix.needsUpdate = true;
+    if (vents.instanceColor) vents.instanceColor.needsUpdate = true;
+    if (glows.instanceColor) glows.instanceColor.needsUpdate = true;
+    this.scene.add(vents);
+    this.scene.add(glows);
   }
 
   _buildArrow() {
@@ -419,6 +509,12 @@ export class World {
     });
   }
 
+  setBaseLevel(level) {
+    const shown = Math.max(0, Math.min(this.pylons.length, (level | 0) - 1));
+    for (let i = 0; i < this.pylons.length; i++) this.pylons[i].visible = i < shown;
+    if (this.beaconLight) this.beaconLight.intensity = 28 + shown * 6;
+  }
+
   pulseSell() {
     this.sellPulse = 1;
   }
@@ -471,6 +567,8 @@ export class World {
       fish.age += dt;
       const dx = fish.x - state.x;
       const dz = fish.z - state.z;
+      const near = dx * dx + dz * dz < 95 * 95;
+      fish.mesh.visible = near;
       if (dx * dx + dz * dz < 20) {
         fish.angle = Math.atan2(dx, dz);
       } else {
@@ -496,15 +594,18 @@ export class World {
       b.mesh.material.opacity = 0.15 + (1 - b.y / 8) * 0.2;
     }
 
-    if (state.showArrow && state.dist > 8) {
-      const ang = Math.atan2(-state.x, -state.z);
+    const sellDist = state.sellDist ?? state.dist;
+    const sellX = state.sellX ?? 0;
+    const sellZ = state.sellZ ?? 0;
+    if (state.showArrow && sellDist > 8) {
+      const ang = Math.atan2(sellX - state.x, sellZ - state.z);
       const ahead = 2.7;
       const ax = state.x + Math.sin(ang) * ahead;
       const az = state.z + Math.cos(ang) * ahead;
       this.arrow.visible = true;
       this.arrow.position.set(ax, groundHeight(ax, az) + 0.2, az);
       // Shape tip is -Z after rotateX(-90°). Flip so it points along +Z at yaw 0,
-      // then yaw toward the base (atan2 matches the sub's facing).
+      // then yaw toward the nearest sell point (atan2 matches the sub's facing).
       this.arrow.rotation.y = ang + Math.PI;
       const s = 0.72 + Math.sin(time * 6) * 0.05;
       this.arrow.scale.setScalar(s);
@@ -515,7 +616,7 @@ export class World {
 }
 
 function smoothDepth(dist) {
-  const t = (dist - 120) / 100;
+  const t = (dist - 200) / 180;
   return Math.max(0, Math.min(1, t));
 }
 

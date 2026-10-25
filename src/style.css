@@ -72,7 +72,7 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
   gap: 8px;
 }
 
-#mute, #audio-settings, .ghost, #start, .card button {
+#mute, #audio-settings, .ghost, #start, .card button, .sheet-tabs button, #build-outpost, #warp-home {
   border: 0;
   cursor: pointer;
   font-weight: 800;
@@ -309,9 +309,49 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
   overflow: auto;
 }
 
-.upgrade-title {
-  font-weight: 800;
+.sheet-tabs {
+  display: flex;
+  gap: 4px;
   margin-bottom: 8px;
+}
+
+.sheet-tabs button {
+  flex: 1;
+  border-radius: 999px;
+  padding: 4px 6px;
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+.sheet-tabs button.active {
+  background: var(--gold);
+  color: #1b3340;
+}
+
+#build-outpost,
+#warp-home {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 7;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  border-radius: 999px;
+  padding: 10px 16px;
+  background: #3ec8ff;
+  color: #102830;
+  box-shadow: 0 4px 0 #1a7ea3;
+}
+
+#warp-home { background: #ffe56a; box-shadow: 0 4px 0 #c9a227; }
+
+#hud.has-build #warp-home { bottom: calc(62px + env(safe-area-inset-bottom)); }
+
+#build-outpost.is-broke,
+#warp-home.is-broke {
+  background: #3c5563;
+  color: #d5e4ea;
+  box-shadow: none;
 }
 
 #upgrade-cards { display: flex; flex-direction: column; gap: 8px; }
@@ -325,6 +365,7 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 
 .card.near { outline: 2px solid #fff3b0; }
 .card.recommend { background: rgba(255, 229, 106, 0.08); }
+.card.is-locked { opacity: 0.72; }
 
 .card-name { font-weight: 800; }
 .card-lv { font-size: 13px; color: var(--muted); }
@@ -500,14 +541,16 @@ h1 {
   .tank-bar { height: 7px; margin-top: 4px; }
   #zone-pill { margin-bottom: 2px; }
   #upgrade {
-    max-height: 26dvh;
+    max-height: 30dvh;
     padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
   }
-  .upgrade-title { margin-bottom: 4px; font-size: 14px; }
+  .sheet-tabs { margin-bottom: 4px; }
+  .sheet-tabs button { font-size: 12px; padding: 3px 0; }
   #upgrade-cards { gap: 6px; }
   .card { min-width: 142px; padding: 6px; }
+  .card-stat, .card-next { font-size: 11px; }
   .card button { margin-top: 4px; padding: 5px 8px; font-size: 13px; }
-  #hud.at-base .dock { bottom: calc(104px + env(safe-area-inset-bottom)); }
+  #hud.at-base .dock { bottom: calc(128px + env(safe-area-inset-bottom)); }
 }
 
 @media (max-width: 859px) and (orientation: landscape) {

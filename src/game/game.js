@@ -3,15 +3,21 @@ import { Activities } from './activities.js';
 import { AudioBus } from './audio.js';
 import {
   CUTTER_LEVELS,
+  DECOY_LEVELS,
+  DEPTH_LEVELS,
   PADS,
   POWER_NEED,
   PRICE_LEVELS,
   PROP_LEVELS,
+  SELL_RADIUS,
   TANK_LEVELS,
   UPGRADE_RADIUS,
   UPGRADES,
+  WORLD,
+  WORLD_LIMIT,
   WRECK,
   cutterStats,
+  decoyKeep,
   nearestPad,
   padPosition,
   priceMult,
@@ -19,7 +25,26 @@ import {
   tankCapacity,
 } from './constants.js';
 import { VIEW_ZOOM_MAX, VIEW_ZOOM_MIN, cameraRig } from './cameraRig.js';
-import { features } from './features.js';
+import { CargoDrone } from './drone.js';
+import {
+  BASE_MAX,
+  FACILITIES,
+  accessAt,
+  baseUpgradeCost,
+  containPosition,
+  droneStats,
+  nextGateHint,
+  facilityCost,
+  outpostArrival,
+  outpostBlocked,
+  outpostBuildCost,
+  outpostCap,
+  outpostSellRadius,
+  processMult,
+  warpCooldown,
+} from './economy.js';
+import { applyFacilityFeatures, features } from './features.js';
+import { Outposts } from './outposts.js';
 import { FX } from './fx.js';
 import { Input } from './input.js';
 import { clamp, damp, smoothstep } from './math.js';
@@ -27,7 +52,8 @@ import { Player } from './player.js';
 import { Resources } from './resources.js';
 import { BigTargets } from './targets.js';
 import { clearSave, loadSave, writeSave } from './save.js';
-import { zoneAt } from './terrain.js';
+import { zoneAt, zoneForPlayer } from './terrain.js';
+import { THREAT, Threats, threatName } from './threats.js';
 import { UI } from './ui.js';
 import { World } from './world.js';
 
@@ -42,8 +68,12 @@ export class Game {
       tank: clamp(this.save.levels.tank, 1, TANK_LEVELS.length),
       propeller: clamp(this.save.levels.propeller, 1, PROP_LEVELS.length),
       price: clamp(this.save.levels.price, 1, PRICE_LEVELS.length),
+      depth: clamp(this.save.levels.depth || 1, 1, DEPTH_LEVELS.length),
+      decoy: clamp(this.save.levels.decoy ?? 1, 1, DECOY_LEVELS.length),
     };
     this.stats = { ...this.save.stats };
+    this.baseLevel = clamp(this.save.baseLevel || 1, 1, BASE_MAX);
+    this.facilities = { ...this.save.facilities };
     this.viewZoom = clamp(this.save.viewZoom ?? 1, VIEW_ZOOM_MIN, VIEW_ZOOM_MAX);
     this.zoom = this.viewZoom;
     this.tank = { cargo: 0, value: 0, pieces: [], warned: false };
@@ -58,6 +88,8 @@ export class Game {
     this.combo = 0;
     this.comboTime = -10;
     this.hardHintAt = -10;
+    this.gateHintAt = -10;
+    this.inFarDeep = false;
     this.statusHint = '';
     this.statusUntil = 0;
     this.fullHintAt = -10;
@@ -93,6 +125,13 @@ export class Game {
     this.resources = new Resources(this.scene);
     this.activities = new Activities(this.scene);
     this.targets = new BigTargets(this.scene);
+    this.threats = new Threats(this.scene);
+    this.outposts = new Outposts(this.scene, this.world.colliders);
+    this.outposts.load(this.save.outposts);
+    this.outposts.setSellRadius(outpostSellRadius(this.facilities.outpost));
+    this.drone = new CargoDrone(this.scene);
+    this.warpReadyAt = 0;
+    this.world.setBaseLevel(this.baseLevel);
     this.world.colliders.push(...this.targets.colliders());
     this.player = new Player(this.scene);
     this.fx = new FX(this.scene);
@@ -110,6 +149,11 @@ export class Game {
     this.ui.onReset = () => this.reset();
     this.ui.onToggleMute = () => this.toggleMute();
     this.ui.onBuy = (id) => this.buy(id);
+    this.ui.onFacility = (id) => this.buyFacility(id);
+    this.ui.onBase = () => this.upgradeBase();
+    this.ui.onWarp = (index) => this.warpTo(index);
+    this.ui.onBuild = () => this.placeOutpost();
+    this.ui.onWarpHome = () => this.warpHome();
     this.ui.onDeny = () => {
       this.audio.unlock();
       this.audio.playSfx('deny');
@@ -164,9 +208,12 @@ export class Game {
 
   snapshot() {
     return {
-      version: 1,
+      version: 3,
       money: this.money,
       levels: { ...this.levels },
+      baseLevel: this.baseLevel,
+      facilities: { ...this.facilities },
+      outposts: this.outposts.serialize(),
       stats: { ...this.stats },
       mute: this.audio.muted,
       bgm: Math.round(this.audio.bgm * 100),
@@ -275,7 +322,8 @@ export class Game {
     this.comboTime = this.time;
     if (this.combo > this.stats.bestCombo) this.stats.bestCombo = this.combo;
     const bonus = Math.min(0.3, Math.max(0, this.combo - 1) * 0.03);
-    const gain = Math.round(entity.value * (1 + bonus));
+    const mult = entity.prize ? 1 : processMult(this.facilities.process, entity.type?.id);
+    const gain = Math.round(entity.value * (1 + bonus) * mult);
     this.tank.cargo += entity.cargo;
     this.tank.value += gain;
     this.tank.pieces.push(entity.colorHex);
@@ -393,13 +441,29 @@ export class Game {
     this.statusUntil = this.time + seconds;
   }
 
-  trySell() {
-    const inside = Math.hypot(this.player.x, this.player.z) < 6;
-    if (inside && !this.wasInside) this.onEnterSell();
-    this.wasInside = inside;
+  insideSell(x, z) {
+    if (Math.hypot(x, z) < SELL_RADIUS) return { kind: 'base', x: 0, z: 0 };
+    const hit = this.outposts.contains(x, z);
+    if (hit) return { kind: 'outpost', x: hit.x, z: hit.z, ref: hit };
+    return null;
   }
 
-  onEnterSell() {
+  nearestSellPoint(x, z) {
+    let best = { x: 0, z: 0, d: Math.hypot(x, z), name: '基地' };
+    for (const entry of this.outposts.list) {
+      const dist = Math.hypot(x - entry.x, z - entry.z);
+      if (dist < best.d) best = { x: entry.x, z: entry.z, d: dist, name: '前線', ref: entry };
+    }
+    return best;
+  }
+
+  trySell() {
+    const hit = this.insideSell(this.player.x, this.player.z);
+    if (hit && !this.wasInside) this.onEnterSell(hit);
+    this.wasInside = Boolean(hit);
+  }
+
+  onEnterSell(hit) {
     if (this.tank.cargo <= 0) {
       if (!this.emptyHintShown && this.stats.cut === 0 && !this.activities.hooked) {
         this.emptyHintShown = true;
@@ -420,10 +484,56 @@ export class Game {
     this.audio.playSfx('sell');
     this.fx.coins(this.player.x, 1.3, this.player.z);
     this.fx.bubbles(this.player.x, 0.6, this.player.z, 12);
-    this.world.pulseSell();
+    if (hit?.kind === 'outpost' && hit.ref) hit.ref.pulse = 0.45;
+    else this.world.pulseSell();
     this.shake = Math.max(this.shake, 0.48);
     buzz(28);
     this.persist();
+  }
+
+  stealCargo(kind) {
+    const cargo = this.tank.cargo;
+    if (cargo <= 0) return null;
+    let take = Math.round(cargo * THREAT.stealFraction);
+    take = Math.min(cargo, THREAT.stealMax, Math.max(THREAT.stealMin, take));
+    const keep = decoyKeep(this.levels.decoy);
+    take = Math.min(cargo, Math.max(1, Math.round(take * (1 - keep))));
+    if (take < 1) return null;
+    const ratio = take / cargo;
+    const color = this.tank.pieces[this.tank.pieces.length - 1] ?? 0x7af6ff;
+    const value = this.tank.value * ratio;
+    this.tank.cargo -= take;
+    this.tank.value = Math.max(0, this.tank.value - value);
+    if (this.tank.cargo <= 0) {
+      this.tank.cargo = 0;
+      this.tank.value = 0;
+      this.tank.pieces.length = 0;
+      this.tank.warned = false;
+    } else {
+      const drop = Math.min(this.tank.pieces.length, Math.max(1, Math.round(this.tank.pieces.length * ratio)));
+      if (drop > 0) this.tank.pieces.splice(0, drop);
+    }
+    this.audio.playSfx('steal');
+    this.ui.toast(`${threatName(kind)}に奪われた`, 'bad');
+    this.fx.chunks(this.player.x, 1.1, this.player.z, color, 5);
+    this.shake = Math.max(this.shake, 0.4);
+    buzz(18);
+    return { cargo: take, value, color };
+  }
+
+  recoverCargo(stolen) {
+    if (!stolen) return;
+    this.tank.cargo += stolen.cargo;
+    const bonus = Math.max(0, Math.round(stolen.value * THREAT.recoverBonus));
+    this.tank.value += stolen.value + bonus;
+    for (let i = 0; i < Math.min(8, stolen.cargo); i++) this.tank.pieces.push(stolen.color);
+    if (this.tank.pieces.length > 36) this.tank.pieces.splice(0, this.tank.pieces.length - 36);
+    this.audio.playSfx('cut');
+    this.audio.playSfx('pickup');
+    this.ui.toast('取り返した', 'good');
+    this.fx.chunks(this.player.x, 1.2, this.player.z, stolen.color, 6);
+    this.shake = Math.max(this.shake, 0.28);
+    buzz(12);
   }
 
   buy(id) {
@@ -443,9 +553,16 @@ export class Game {
     this.levels[id] += 1;
     let message = `${def.name}を強化した`;
     if (id === 'cutter') message = CUTTER_LEVELS[this.levels.cutter - 1].shout || message;
+    if (id === 'depth') {
+      const row = DEPTH_LEVELS[this.levels.depth - 1];
+      message = this.levels.cutter >= row.cutter
+        ? `${row.reach}まで進める`
+        : `深度Lv${this.levels.depth}（${row.reach}はカッターLv${row.cutter}も）`;
+    }
     if (id === 'tank') message = `タンク容量 ${tankCapacity(this.levels.tank)}`;
     if (id === 'propeller') message = '速度が上がった！';
     if (id === 'price') message = `売値が ×${priceMult(this.levels.price).toFixed(2)} になった`;
+    if (id === 'decoy') message = 'デコイで奪われにくくなった';
     this.ui.toast(message, 'good');
     this.ui.bumpMoney();
     this.audio.playSfx('buy');
@@ -460,6 +577,205 @@ export class Game {
     this.persist();
   }
 
+  atMainBase() {
+    return Math.hypot(this.player.x, this.player.z) <= UPGRADE_RADIUS;
+  }
+
+  upgradeBase() {
+    if (!this.atMainBase()) return;
+    const cost = baseUpgradeCost(this.baseLevel);
+    if (cost == null) return;
+    if (this.money < cost) {
+      this.audio.unlock();
+      this.audio.playSfx('deny');
+      return;
+    }
+    this.money -= cost;
+    this.baseLevel += 1;
+    this.world.setBaseLevel(this.baseLevel);
+    this.ui.toast(`拠点Lv${this.baseLevel}`, 'good');
+    this.ui.bumpMoney();
+    this.audio.playSfx('buy');
+    this.fx.bubbles(0, 1, 0, 10);
+    this.shake = Math.max(this.shake, 0.2);
+    buzz(12);
+    this.persist();
+  }
+
+  buyFacility(id) {
+    if (!this.atMainBase()) return;
+    const def = FACILITIES.find((entry) => entry.id === id);
+    if (!def) return;
+    if (this.baseLevel < def.need) {
+      this.audio.playSfx('deny');
+      return;
+    }
+    const level = this.facilities[id] || 0;
+    if (level >= def.max) return;
+    const cost = facilityCost(def, level);
+    if (cost == null) return;
+    if (this.money < cost) {
+      this.audio.unlock();
+      this.audio.playSfx('deny');
+      return;
+    }
+    this.money -= cost;
+    this.facilities[id] = level + 1;
+    if (id === 'outpost') this.outposts.setSellRadius(outpostSellRadius(this.facilities.outpost));
+    this.ui.toast(`${def.name} Lv${this.facilities[id]}`, 'good');
+    this.ui.bumpMoney();
+    this.audio.playSfx('buy');
+    this.fx.bubbles(this.player.x, 1, this.player.z, 8);
+    this.shake = Math.max(this.shake, 0.16);
+    buzz(12);
+    this.persist();
+  }
+
+  placeOutpost() {
+    const cap = outpostCap(this.baseLevel, this.facilities.outpost);
+    if (this.facilities.outpost < 1 || this.outposts.list.length >= cap) return;
+    const x = this.player.x;
+    const z = this.player.z;
+    if (outpostBlocked(x, z, this.outposts.list, WORLD_LIMIT, this.world.colliders)) return;
+    const cost = outpostBuildCost(this.outposts.list.length, this.facilities.outpost);
+    if (this.money < cost) {
+      this.audio.unlock();
+      this.audio.playSfx('deny');
+      return;
+    }
+    this.money -= cost;
+    this.outposts.add(x, z);
+    this.ui.toast('前線基地を建てた', 'good');
+    this.ui.bumpMoney();
+    this.audio.playSfx('buy');
+    this.fx.bubbles(x, 1.2, z, 10);
+    this.shake = Math.max(this.shake, 0.2);
+    buzz(16);
+    this.persist();
+  }
+
+  holdAtGate() {
+    const gate = containPosition(this.player.x, this.player.z, this.levels.cutter, this.levels.depth);
+    if (!gate.blocked) return;
+    this.player.pin(gate.x, gate.z);
+    if (gate.ring) shedRadial(this.player);
+    if (gate.wreck) shedToward(this.player, WRECK.x, WRECK.z);
+    if (this.time - this.gateHintAt > 3.4 && gate.message) {
+      this.gateHintAt = this.time;
+      this.ui.toast(gate.message, 'info');
+      this.audio.playSfx('deny');
+    }
+  }
+
+  movePlayer(x, z) {
+    const gate = containPosition(x, z, this.levels.cutter, this.levels.depth);
+    this.player.placeAt(gate.x, gate.z);
+    this.wasInside = Boolean(this.insideSell(gate.x, gate.z));
+    const zone = zoneForPlayer(gate.x, gate.z, this.levels.cutter, this.levels.depth);
+    if (zone.id !== this.zone.id) {
+      this.zone = zone;
+      this.audio.setZone(zone.id);
+    }
+  }
+
+  armWarp() {
+    this.warpReadyAt = this.time + warpCooldown(this.facilities.warp);
+  }
+
+  warpTo(index) {
+    if (!this.atMainBase()) return;
+    if (this.facilities.warp < 1) return;
+    if (this.time < this.warpReadyAt) {
+      this.audio.playSfx('deny');
+      return;
+    }
+    const entry = this.outposts.list[index];
+    if (!entry) return;
+    const spot = this.warpLanding(entry);
+    if (!spot) {
+      this.ui.toast(nextGateHint(this.levels.cutter, this.levels.depth), 'info');
+      this.audio.playSfx('deny');
+      return;
+    }
+    this.movePlayer(spot.x, spot.z);
+    this.armWarp();
+    this.ui.toast('前線基地へ', 'info');
+    this.audio.playSfx('zone', { deeper: true });
+  }
+
+  warpLanding(outpost) {
+    const outward = outpostArrival(outpost, this.outposts.radius);
+    if (!containPosition(outward.x, outward.z, this.levels.cutter, this.levels.depth).blocked) return outward;
+    const len = Math.hypot(outpost.x, outpost.z) || 1;
+    const gap = this.outposts.radius + 8;
+    const inward = {
+      x: outpost.x - (outpost.x / len) * gap,
+      z: outpost.z - (outpost.z / len) * gap,
+    };
+    if (!containPosition(inward.x, inward.z, this.levels.cutter, this.levels.depth).blocked) return inward;
+    return null;
+  }
+
+  warpHome() {
+    if (this.facilities.warp < 3) return;
+    if (this.time < this.warpReadyAt) {
+      this.audio.playSfx('deny');
+      return;
+    }
+    const near = this.outposts.nearest(this.player.x, this.player.z);
+    if (!near || near.d > 14) return;
+    const dist = Math.hypot(this.player.x, this.player.z) || 1;
+    this.movePlayer((this.player.x / dist) * 10, (this.player.z / dist) * 10);
+    this.armWarp();
+    this.ui.toast('基地へ戻った', 'info');
+    this.audio.playSfx('zone', { deeper: false });
+  }
+
+  deliverDrone(value, x, z) {
+    const payout = Math.max(1, Math.round(value * priceMult(this.levels.price)));
+    this.money += payout;
+    this.stats.earned += payout;
+    this.ui.toast(`ドローン +${payout.toLocaleString('ja-JP')}`, 'good');
+    this.ui.bumpMoney();
+    this.audio.playSfx('sell');
+    this.fx.coins(x, 1.6, z);
+    this.persist();
+  }
+
+  sonarMarkers() {
+    const level = this.facilities.sonar || 0;
+    if (level < 1) return [];
+    const marks = [];
+    for (const target of this.targets.list) {
+      if (target.state === 'gone') continue;
+      marks.push({ x: target.x, z: target.z, kind: 'big' });
+    }
+    if (level >= 2) {
+      const rares = [];
+      for (const entity of this.resources.entities) {
+        if (entity.state !== 'alive') continue;
+        if (entity.type?.id !== 'pearl' && !entity.type?.rare) continue;
+        rares.push({
+          x: entity.x,
+          z: entity.z,
+          kind: 'rare',
+          d: Math.hypot(entity.x - this.player.x, entity.z - this.player.z),
+        });
+      }
+      rares.sort((a, b) => a.d - b.d);
+      for (const rare of rares.slice(0, 6)) marks.push(rare);
+    }
+    if (level >= 3 && this.activities?.digs) {
+      const digs = Array.isArray(this.activities.digs) ? this.activities.digs : [];
+      for (const dig of digs) {
+        if (!dig || dig.done || dig.state === 'done' || dig.state === 'gone') continue;
+        if (!Number.isFinite(dig.x) || !Number.isFinite(dig.z)) continue;
+        marks.push({ x: dig.x, z: dig.z, kind: 'dig' });
+      }
+    }
+    return marks;
+  }
+
   update(dt) {
     this.time += dt;
     this.zoom = damp(this.zoom, this.viewZoom, 12, dt);
@@ -472,10 +788,13 @@ export class Game {
     const cutter = cutterStats(this.levels.cutter);
     this.player.cutMode = this.frameCutMode;
     this.player.update(dt, move, speed, this.world.colliders, cutter.range);
+    if (this.started) this.holdAtGate();
 
     if (this.started) {
       if (!this.movedOnce && this.player.speed > 1.2) this.movedOnce = true;
-      const zone = zoneAt(this.player.x, this.player.z);
+      const zone = zoneForPlayer(this.player.x, this.player.z, this.levels.cutter, this.levels.depth);
+      const access = accessAt(this.levels.cutter, this.levels.depth);
+      const far = Math.hypot(this.player.x, this.player.z) > WORLD.innerDeep + 0.35 && access.radius > WORLD.innerDeep;
       if (zone.id !== this.zone.id) {
         const prev = this.zone;
         const deeper = zone.rank > prev.rank;
@@ -483,12 +802,35 @@ export class Game {
         this.audio.setZone(zone.id);
         this.audio.playSfx('zone', { deeper });
         if (deeper) this.ui.toast(zone.enter, 'info');
+        this.inFarDeep = zone.id === 'deep' && far;
+        if (zone.id === 'deep' || zone.id === 'wreck') this.threats.enterZone();
+      } else if (zone.id === 'deep' && far && !this.inFarDeep) {
+        this.inFarDeep = true;
+        this.ui.toast('深海の奥へ入った', 'info');
+        this.audio.playSfx('zone', { deeper: true });
+      } else if (!far) {
+        this.inFarDeep = false;
       }
       this.trySell();
       this.frameCutMode = 'idle';
+      applyFacilityFeatures(this.facilities);
       const cpos = this.player.getCutterXZ();
       this.resources.harvestAround(cpos.x, cpos.z, cutter.range, cutter.damage, cutter.power, this.harvest);
       this.targets.harvestAround(cpos.x, cpos.z, cutter.range, cutter.damage, cutter.power, this.harvest);
+      this.threats.update(dt, {
+        playing: true,
+        x: this.player.x,
+        z: this.player.z,
+        zone: this.zone.id,
+        cargo: this.tank.cargo,
+        cutterX: cpos.x,
+        cutterZ: cpos.z,
+        cutterRange: cutter.range,
+        time: this.time,
+        onWarn: () => this.audio.playSfx('warn'),
+        onSteal: (kind) => this.stealCargo(kind),
+        onRecover: (stolen) => this.recoverCargo(stolen),
+      });
       if (features.autoVacuum && features.vacuumRadius > 0) {
         this.resources.harvestAround(
           this.player.x,
@@ -511,9 +853,21 @@ export class Game {
         const nozzle = this.player.getNozzle();
         this.fx.bubbles(nozzle.x, nozzle.y, nozzle.z, 1);
       }
+      this.drone.update(dt, {
+        active: document.visibilityState !== 'hidden',
+        stats: droneStats(this.facilities.drone),
+        tank: this.tank,
+        x: this.player.x,
+        z: this.player.z,
+        inside: Boolean(this.insideSell(this.player.x, this.player.z)),
+        time: this.time,
+        dest: this.nearestSellPoint(this.player.x, this.player.z),
+        onDeliver: (value, x, z) => this.deliverDrone(value, x, z),
+      });
     }
 
-    this.resources.update(dt, this.time);
+    this.outposts.update(dt, this.time);
+    this.resources.update(dt, this.time, { x: this.player.x, z: this.player.z });
     this.activities.update(dt, this.time, {
       started: this.started,
       player: this.player,
@@ -532,11 +886,15 @@ export class Game {
       power: cutter.power,
     });
     const dist = Math.hypot(this.player.x, this.player.z);
+    const sell = this.nearestSellPoint(this.player.x, this.player.z);
     const cap = tankCapacity(this.levels.tank);
     this.world.update(dt, this.time, {
       x: this.player.x,
       z: this.player.z,
       dist,
+      sellX: sell.x,
+      sellZ: sell.z,
+      sellDist: sell.d,
       showArrow: this.started && cap > 0 && this.tank.cargo / cap >= 0.75,
       viewScale: this.rig?.distScale ?? 1,
       indicatorScale: this.rig?.indicatorScale ?? 1,
@@ -546,7 +904,7 @@ export class Game {
     const home = this.player.getCargoWorld();
     this.fx.update(dt, home);
 
-    const depth = smoothstep(120, 220, dist);
+    const depth = smoothstep(220, 380, dist);
     this.player.lamp.intensity = 8 + depth * 34;
     this.player.lamp.distance = 16 + depth * 12;
 
@@ -559,9 +917,11 @@ export class Game {
         money: this.displayMoney,
         rawMoney: this.money,
         cutterLevel: this.levels.cutter,
+        depthLevel: this.levels.depth,
         tankLevel: this.levels.tank,
         propLevel: this.levels.propeller,
         priceLevel: this.levels.price,
+        decoyLevel: this.levels.decoy,
         tankCargo: this.tank.cargo,
         tankCap: cap,
         payout: Math.round(this.tank.value * priceMult(this.levels.price)),
@@ -580,6 +940,22 @@ export class Game {
         showMoveHint: !this.movedOnce && this.playTime > 0.3,
         pointer: this.input.pointer,
         hint: this.time < this.statusUntil ? this.statusHint : '',
+        baseLevel: this.baseLevel,
+        facilities: this.facilities,
+        outposts: this.outposts.list,
+        outpostCap: outpostCap(this.baseLevel, this.facilities.outpost),
+        canBuild:
+          this.facilities.outpost >= 1 &&
+          this.outposts.list.length < outpostCap(this.baseLevel, this.facilities.outpost) &&
+          !outpostBlocked(this.player.x, this.player.z, this.outposts.list, WORLD_LIMIT, this.world.colliders),
+        buildCost: outpostBuildCost(this.outposts.list.length, this.facilities.outpost),
+        buildBroke: this.money < outpostBuildCost(this.outposts.list.length, this.facilities.outpost),
+        sellDist: sell.d,
+        sellName: sell.name,
+        showWarpHome: (this.facilities.warp || 0) >= 3 && (this.outposts.nearest(this.player.x, this.player.z)?.d ?? 99) <= 14,
+        warpCd: Math.max(0, this.warpReadyAt - this.time),
+        sonar: this.sonarMarkers(),
+        threat: this.threats.marker(),
       });
     }
 
@@ -617,6 +993,30 @@ export class Game {
       this.shake = Math.max(0, this.shake - dt * 1.7);
     }
     this.camera.lookAt(this.curLook);
+  }
+}
+
+function shedRadial(player) {
+  const dist = Math.hypot(player.x, player.z) || 1;
+  const rx = player.x / dist;
+  const rz = player.z / dist;
+  const radial = player.vx * rx + player.vz * rz;
+  if (radial > 0) {
+    player.vx -= radial * rx;
+    player.vz -= radial * rz;
+  }
+}
+
+function shedToward(player, x, z) {
+  const dx = x - player.x;
+  const dz = z - player.z;
+  const dist = Math.hypot(dx, dz) || 1;
+  const ix = dx / dist;
+  const iz = dz / dist;
+  const inward = player.vx * ix + player.vz * iz;
+  if (inward > 0) {
+    player.vx -= inward * ix;
+    player.vz -= inward * iz;
   }
 }
 

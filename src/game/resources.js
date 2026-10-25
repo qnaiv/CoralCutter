@@ -32,39 +32,78 @@ export class Resources {
         emissiveIntensity: glow[1],
       });
       const spots = [];
-      let attempts = 0;
-      const maxAttempts = type.count * 60;
-      while (spots.length < type.count && attempts < maxAttempts) {
-        attempts++;
-        let x;
-        let z;
+      const sample = () => {
         if (type.region === 'wreck') {
           const a = rand() * Math.PI * 2;
           const r = 5 + rand() * (WRECK.radius - 8);
-          x = WRECK.x + Math.cos(a) * r;
-          z = WRECK.z + Math.sin(a) * r;
-        } else {
-          const a = rand() * Math.PI * 2;
-          const r = Math.sqrt(type.rMin ** 2 + rand() * (type.rMax ** 2 - type.rMin ** 2));
-          x = Math.cos(a) * r;
-          z = Math.sin(a) * r;
-          if (inWreck(x, z, WRECK.radius + 3)) continue;
+          return { x: WRECK.x + Math.cos(a) * r, z: WRECK.z + Math.sin(a) * r };
         }
-        let ok = true;
+        const a = rand() * Math.PI * 2;
+        const r = Math.sqrt(type.rMin ** 2 + rand() * (type.rMax ** 2 - type.rMin ** 2));
+        return { x: Math.cos(a) * r, z: Math.sin(a) * r };
+      };
+      const inside = (x, z) => {
+        if (type.region === 'wreck') return inWreck(x, z, WRECK.radius - 1.5);
+        if (inWreck(x, z, WRECK.radius + 3)) return false;
+        const dist = Math.hypot(x, z);
+        return dist >= type.rMin && dist <= type.rMax;
+      };
+      const fits = (x, z) => {
         for (let i = 0; i < placed.length; i++) {
           const p = placed[i];
           const dx = p.x - x;
           const dz = p.z - z;
           const need = Math.max(type.minDist, p.minDist);
-          if (dx * dx + dz * dz < need * need) {
-            ok = false;
-            break;
-          }
+          if (dx * dx + dz * dz < need * need) return false;
         }
-        if (!ok) continue;
+        return true;
+      };
+      const accept = (x, z) => {
         const spot = { x, z, minDist: type.minDist };
         placed.push(spot);
         spots.push(spot);
+      };
+      if (type.clusters && type.clusterSize && type.clusterRadius) {
+        const sep = type.clusterRadius * 2.15;
+        const centers = [];
+        let attempts = 0;
+        while (centers.length < type.clusters && attempts < type.clusters * 90) {
+          attempts++;
+          const spot = sample();
+          if (!inside(spot.x, spot.z)) continue;
+          let ok = true;
+          for (const center of centers) {
+            const dx = center.x - spot.x;
+            const dz = center.z - spot.z;
+            if (dx * dx + dz * dz < sep * sep) {
+              ok = false;
+              break;
+            }
+          }
+          if (ok) centers.push(spot);
+        }
+        for (const center of centers) {
+          let made = 0;
+          const limit = type.clusterSize * 80;
+          for (let n = 0; n < limit && made < type.clusterSize; n++) {
+            const ring = n < type.clusterSize;
+            const a = ring ? (n / type.clusterSize) * Math.PI * 2 + rand() * 0.5 : rand() * Math.PI * 2;
+            const radial = ring ? type.clusterRadius * (0.35 + (n % 2) * 0.4) : Math.sqrt(rand()) * type.clusterRadius;
+            const x = center.x + Math.cos(a) * radial;
+            const z = center.z + Math.sin(a) * radial;
+            if (!inside(x, z) || !fits(x, z)) continue;
+            accept(x, z);
+            made++;
+          }
+        }
+      }
+      let attempts = 0;
+      const maxAttempts = type.count * 70;
+      while (spots.length < type.count && attempts < maxAttempts) {
+        attempts++;
+        const spot = sample();
+        if (!inside(spot.x, spot.z) || !fits(spot.x, spot.z)) continue;
+        accept(spot.x, spot.z);
       }
 
       const mesh = new THREE.InstancedMesh(geos[type.geo], mat, Math.max(1, spots.length));
@@ -153,7 +192,8 @@ export class Resources {
     }
   }
 
-  update(dt, time) {
+  update(dt, time, focus) {
+    this._focus = focus || null;
     for (let i = 0; i < this.entities.length; i++) {
       const e = this.entities[i];
       if (e.hitCd > 0) e.hitCd = Math.max(0, e.hitCd - dt);
@@ -180,17 +220,26 @@ export class Resources {
         }
       }
     }
-    this.sync(time);
+    this.sync(time, this._focus);
   }
 
-  sync(time) {
+  sync(time, focus) {
     const dummy = this._dummy;
     const tint = this._color;
+    const fx = focus?.x ?? 0;
+    const fz = focus?.z ?? 0;
+    const cull = focus ? 78 * 78 : Infinity;
     for (let g = 0; g < this.groups.length; g++) {
       const group = this.groups[g];
       const { mesh, entities } = group;
+      let dirty = false;
       for (let i = 0; i < entities.length; i++) {
         const e = entities[i];
+        const dx = e.x - fx;
+        const dz = e.z - fz;
+        const idle = e.state === 'alive' && e.flash <= 0;
+        if (idle && dx * dx + dz * dz > cull) continue;
+        dirty = true;
         const sway =
           Math.sin(time * e.type.swaySpeed + e.phase) *
           e.type.swayAmp *
@@ -223,6 +272,7 @@ export class Resources {
         if (e.flash > 0) tint.lerp(e.flashHard ? this._red : this._white, e.flash * 0.85);
         mesh.setColorAt(i, tint);
       }
+      if (!dirty) continue;
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }

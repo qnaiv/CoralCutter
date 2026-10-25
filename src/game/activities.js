@@ -1,110 +1,25 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SELL_RADIUS, WRECK } from './constants.js';
+import { ACTIVITIES, WORLD } from './economy.js';
 import { damp, mulberry32, smoothstep } from './math.js';
 import { groundHeight, inWreck } from './terrain.js';
 
-/** Spots kept clear of instanced plants so these props stay readable. */
-const CLAMS = [
-  { name: '大貝', x: 22, z: -24, hardness: 1, value: 110, phase: Math.PI / 2, respawn: 18, demo: true },
-  { name: '大貝', x: -26, z: 22, hardness: 1, value: 110, phase: 0.6, respawn: 18 },
-  { name: '大貝', x: -78, z: -96, hardness: 3, value: 200, phase: 1.4, respawn: 20 },
-  { name: '大貝', x: 132, z: -74, hardness: 4, value: 280, phase: 2.2, respawn: 20 },
-  { name: '大貝', x: 16, z: -188, hardness: 5, value: 360, phase: 0.9, respawn: 22 },
-];
+const CLAMS = ACTIVITIES.clams;
+const DIGS = ACTIVITIES.digs;
+const TOWS = ACTIVITIES.tows;
+const FISH = ACTIVITIES.fish;
+const FIXED_PICKUPS = ACTIVITIES.fixedPickups;
+const AVOID = ACTIVITIES.avoid;
 
-const DIGS = [
-  { name: '埋蔵金', x: 10, z: -23, value: 36, color: 0xffd36a, respawn: 22, demo: true },
-  { name: '埋蔵金', x: 24, z: 18, value: 36, color: 0xffd36a, respawn: 22 },
-  { name: '埋蔵金', x: 44, z: -58, value: 72, color: 0xffc83d, respawn: 24 },
-  { name: '埋蔵金', x: -40, z: 64, value: 72, color: 0xffc83d, respawn: 24 },
-  { name: '埋蔵金', x: -88, z: -108, value: 150, color: 0xffb03a, respawn: 26 },
-  { name: '深海の遺物', x: 12, z: -196, value: 240, color: 0x7af6ff, respawn: 28 },
-];
+const PICKUP_LOOK = {
+  starfish: { colors: [0xff7a45, 0xffb03a, 0xff6b8a], geo: 'starfish' },
+  sandShell: { colors: [0xf4e2c4, 0xfff1d6, 0xe7c39a], geo: 'sandShell' },
+  grape: { colors: [0x3d9a4a, 0x2f8f62, 0x67c45a], geo: 'grape' },
+  crystal: { colors: [0x7af6ff, 0xb07bff, 0x4d7dff], geo: 'crystal', emissive: 0x1ad0ff },
+};
 
-const TOWS = [
-  { name: '沈んだ箱', kind: 'crate', x: 46, z: -42, payout: 160, drag: 0.72, respawn: 55, demo: true },
-  { name: '石像', kind: 'statue', x: -64, z: -112, payout: 280, drag: 0.62, respawn: 60 },
-  { name: '錨', kind: 'anchor', x: 136, z: -88, payout: 340, drag: 0.54, respawn: 65 },
-  { name: '石板', kind: 'tablet', x: -8, z: -178, payout: 540, drag: 0.6, respawn: 70 },
-];
-
-const FISH = [
-  { name: 'タイ', x: 16, z: -21.4, value: 24, color: 0xffb03a, homeR: 6.5, demo: true },
-  { name: 'タイ', x: 18.5, z: -25.2, value: 24, color: 0xffd15a, homeR: 5.5, demo: true },
-  { name: 'タイ', x: -18, z: -22, value: 24, color: 0xff8a3a, homeR: 8 },
-  { name: 'タイ', x: 28, z: 16, value: 24, color: 0xffe07a, homeR: 8 },
-  { name: 'ハマチ', x: 58, z: -36, value: 36, color: 0x3dce7a, homeR: 9 },
-  { name: 'ハマチ', x: -50, z: 48, value: 36, color: 0x2eaf62, homeR: 9 },
-  { name: 'ハマチ', x: 30, z: 72, value: 36, color: 0x49d98a, homeR: 9 },
-  { name: 'イトヒキ', x: -84, z: -90, value: 54, color: 0xff6b9a, homeR: 10 },
-  { name: 'イトヒキ', x: 96, z: -120, value: 54, color: 0xff8a5b, homeR: 10 },
-  { name: 'スズキ', x: 118, z: -90, value: 72, color: 0xf4e2c4, homeR: 8 },
-  { name: 'アンコウ', x: 24, z: -176, value: 96, color: 0x7af6ff, homeR: 11 },
-  { name: 'アンコウ', x: -28, z: -168, value: 96, color: 0xb07bff, homeR: 11 },
-];
-
-const PICKUP_DEFS = [
-  {
-    id: 'starfish',
-    name: 'ヒトデ',
-    value: 4,
-    colors: [0xff7a45, 0xffb03a, 0xff6b8a],
-    geo: 'starfish',
-    region: 'shallow',
-    count: 18,
-    respawn: 13,
-  },
-  {
-    id: 'sandShell',
-    name: '砂の貝',
-    value: 8,
-    colors: [0xf4e2c4, 0xfff1d6, 0xe7c39a],
-    geo: 'sandShell',
-    region: 'shallow',
-    count: 14,
-    respawn: 13,
-  },
-  {
-    id: 'grape',
-    name: '海ぶどう',
-    value: 14,
-    colors: [0x3d9a4a, 0x2f8f62, 0x67c45a],
-    geo: 'grape',
-    region: 'kelp',
-    count: 14,
-    respawn: 14,
-  },
-  {
-    id: 'crystal',
-    name: '結晶',
-    value: 36,
-    colors: [0x7af6ff, 0xb07bff, 0x4d7dff],
-    geo: 'crystal',
-    region: 'deep',
-    count: 10,
-    respawn: 14,
-    emissive: 0x1ad0ff,
-  },
-];
-
-const FIXED_PICKUPS = [
-  { type: 'starfish', x: 13, z: -20 },
-  { type: 'starfish', x: 19, z: -19 },
-  { type: 'starfish', x: 12, z: -26 },
-  { type: 'starfish', x: 21, z: -27 },
-  { type: 'sandShell', x: 8, z: -21 },
-  { type: 'grape', x: 42, z: -40 },
-  { type: 'grape', x: 50, z: -46 },
-];
-
-const AVOID = [
-  { x: 0, z: -30, r: 4.2 },
-  { x: 48, z: -48, r: 4.2 },
-  { x: -70, z: -100, r: 4.5 },
-  { x: 118, z: -74, r: 4.2 },
-  { x: 8, z: -184, r: 4.5 },
-];
+const PICKUP_DEFS = ACTIVITIES.pickups.map((entry) => ({ ...entry, ...PICKUP_LOOK[entry.id] }));
 
 export const CLEARINGS = [
   ...CLAMS.map((spot) => ({ x: spot.x, z: spot.z, minDist: 3.6 })),
@@ -413,6 +328,13 @@ export class Activities {
         }
         continue;
       }
+      const awayX = fish.x - fish.playerX;
+      const awayZ = fish.z - fish.playerZ;
+      if (!fish.pinned && awayX * awayX + awayZ * awayZ > 95 * 95) {
+        fish.root.visible = false;
+        continue;
+      }
+      fish.root.visible = true;
       let vx = 0;
       let vz = 0;
       if (!fish.pinned) {
@@ -744,10 +666,16 @@ function blocked(x, z, occupied, minDist) {
 
 function sampleRegion(rand, region) {
   const a = rand() * Math.PI * 2;
-  let r = 20;
-  if (region === 'shallow') r = 17 + rand() * 28;
-  else if (region === 'kelp') r = 52 + rand() * 46;
-  else r = 172 + rand() * 46;
+  let rMin = 18;
+  let rMax = WORLD.shallow - 4;
+  if (region === 'kelp') {
+    rMin = WORLD.shallow + 6;
+    rMax = WORLD.kelp - 6;
+  } else if (region === 'deep') {
+    rMin = WORLD.coral + 8;
+    rMax = WORLD.limit - 12;
+  }
+  const r = Math.sqrt(rMin * rMin + rand() * (rMax * rMax - rMin * rMin));
   const x = Math.cos(a) * r;
   const z = Math.sin(a) * r;
   if (region !== 'deep' && inWreck(x, z, WRECK.radius + 4)) return null;

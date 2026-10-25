@@ -55,7 +55,7 @@
         <div id="toast" aria-live="polite"></div>
         <div id="status-hint" hidden></div>
         <div id="combo" hidden></div>
-        <div id="full-banner" hidden>タンクが満タン！基地へ戻ろう</div>
+        <div id="full-banner" hidden>タンクが満タン！売却地点へ戻ろう</div>
         <div id="move-hint" hidden>WASD / 矢印、またはドラッグで移動</div>
         <div class="dock interactive">
           <canvas id="minimap" width="168" height="168" aria-hidden="true"></canvas>
@@ -71,9 +71,15 @@
           </div>
         </div>
         <section id="upgrade" class="interactive" hidden>
-          <div class="upgrade-title">基地の強化</div>
+          <div class="sheet-tabs" role="tablist">
+            <button type="button" class="interactive" data-tab="gear" role="tab">強化</button>
+            <button type="button" class="interactive" data-tab="facility" role="tab">設備</button>
+            <button type="button" class="interactive" data-tab="base" role="tab">拠点</button>
+          </div>
           <div id="upgrade-cards"></div>
         </section>
+        <button id="build-outpost" class="interactive" type="button" hidden>建てる</button>
+        <button id="warp-home" class="interactive" type="button" hidden>基地へワープ</button>
         <div id="stick" hidden>
           <div id="stick-nub"></div>
         </div>
@@ -89,7 +95,9 @@
             <li>カッターが触れた海藻やサンゴを切断</li>
             <li>魚を追い、開いた大貝を割り、重い物は基地まで引く</li>
             <li>基地の光る円に入ると自動で売却</li>
-            <li>強化して、硬い海域も刈れるように</li>
+            <li>カッターと深度を上げて、先の海域へ</li>
+            <li>拠点を上げると前線基地や設備</li>
+            <li>深海では光る予告のあと、荷物を狙われる</li>
           </ul>
           <p id="title-stats"></p>
           <button id="start" type="button">もぐる</button>

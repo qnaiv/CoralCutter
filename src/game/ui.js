@@ -1,4 +1,15 @@
-import { UPGRADES, buyLabel, canCutText, objectiveFor } from './constants.js';
+import {
+  LANDMARKS,
+  MAP_VIEW,
+  UPGRADES,
+  WORLD_LIMIT,
+  WRECK,
+  ZONE_RINGS,
+  buyLabel,
+  canCutText,
+  objectiveFor,
+} from './constants.js';
+import { FACILITIES, baseNextText, baseUpgradeCost, facilityCost, facilityNext, facilityStat } from './economy.js';
 import { formatNum as formatNumber } from './math.js';
 
 export class UI {
@@ -33,11 +44,20 @@ export class UI {
     this.startBtn = document.getElementById('start');
     this.mapCanvas = document.getElementById('minimap');
     this.mapCtx = this.mapCanvas.getContext('2d');
+    this.buildBtn = document.getElementById('build-outpost');
+    this.warpBtn = document.getElementById('warp-home');
+    this.tabButtons = [...document.querySelectorAll('.sheet-tabs [data-tab]')];
+    this.tab = 'gear';
     this.cardKey = '';
     this.onStart = null;
     this.onReset = null;
     this.onToggleMute = null;
     this.onBuy = null;
+    this.onFacility = null;
+    this.onBase = null;
+    this.onWarp = null;
+    this.onBuild = null;
+    this.onWarpHome = null;
     this.onDeny = null;
     this.onUi = null;
     this.onVolumes = null;
@@ -67,8 +87,18 @@ export class UI {
       this.popover.hidden = true;
       this.settingsBtn.setAttribute('aria-expanded', 'false');
     });
+    for (const btn of this.tabButtons) {
+      btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.tab === btn.dataset.tab) return;
+        this.tab = btn.dataset.tab;
+        this.cardKey = '';
+        this.onUi?.();
+      });
+    }
     this.cards.addEventListener('pointerdown', (e) => {
-      const btn = e.target.closest('[data-buy]');
+      const btn = e.target.closest('[data-buy], [data-facility], [data-base], [data-warp]');
       if (!btn || btn.disabled) return;
       e.preventDefault();
       e.stopPropagation();
@@ -76,8 +106,24 @@ export class UI {
         this.onDeny?.();
         return;
       }
-      this.onBuy?.(btn.dataset.buy);
+      if (btn.dataset.buy) this.onBuy?.(btn.dataset.buy);
+      else if (btn.dataset.facility) this.onFacility?.(btn.dataset.facility);
+      else if (btn.dataset.base) this.onBase?.();
+      else if (btn.dataset.warp != null) this.onWarp?.(Number(btn.dataset.warp));
     });
+    const pressWorld = (btn, fire) => {
+      btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (btn.dataset.broke === '1') {
+          this.onDeny?.();
+          return;
+        }
+        fire();
+      });
+    };
+    pressWorld(this.buildBtn, () => this.onBuild?.());
+    pressWorld(this.warpBtn, () => this.onWarpHome?.());
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Enter' && !this.hud.classList.contains('playing')) {
         this.onUi?.();
@@ -108,7 +154,8 @@ export class UI {
       this.titleStats.textContent = '';
       return;
     }
-    this.titleStats.textContent = `所持金 ${formatNumber(save.money)}　累計売却 ${formatNumber(save.stats.earned)}　ベストコンボ ${save.stats.bestCombo}`;
+    const baseBit = save.baseLevel > 1 ? `　拠点Lv${save.baseLevel}` : '';
+    this.titleStats.textContent = `所持金 ${formatNumber(save.money)}　累計売却 ${formatNumber(save.stats.earned)}　ベストコンボ ${save.stats.bestCombo}${baseBit}`;
   }
 
   showPlaying() {
@@ -134,7 +181,7 @@ export class UI {
 
   sync(state) {
     this.moneyEl.textContent = formatNumber(state.money);
-    this.objectiveEl.textContent = objectiveFor(state.cutterLevel);
+    this.objectiveEl.textContent = objectiveFor(state.cutterLevel, state.depthLevel);
     this.canCutEl.textContent = canCutText(state.cutterLevel);
     this.zoneEl.textContent = state.zone;
     const ratio = state.tankCap > 0 ? state.tankCargo / state.tankCap : 0;
@@ -147,9 +194,10 @@ export class UI {
     } else {
       this.payoutEl.hidden = true;
     }
-    if (ratio >= 0.45 && state.dist > 12) {
+    const sellDist = state.sellDist ?? state.dist;
+    if (ratio >= 0.45 && sellDist > 12) {
       this.navEl.hidden = false;
-      this.navEl.textContent = `基地まで ${Math.round(state.dist)}m`;
+      this.navEl.textContent = `${state.sellName || '基地'}まで ${Math.round(sellDist)}m`;
     } else {
       this.navEl.hidden = true;
     }
@@ -164,6 +212,28 @@ export class UI {
     this.muteBtn.textContent = state.muted ? '音OFF' : '音ON';
     this.hud.classList.toggle('at-base', state.atBase);
     this.upgrade.hidden = !state.atBase;
+    const showBuild = Boolean(state.canBuild && !state.atBase);
+    this.buildBtn.hidden = !showBuild;
+    this.hud.classList.toggle('has-build', showBuild);
+    if (showBuild) {
+      this.buildBtn.textContent = `建てる ${formatNumber(state.buildCost)}`;
+      const broke = Boolean(state.buildBroke);
+      this.buildBtn.classList.toggle('is-broke', broke);
+      this.buildBtn.dataset.broke = broke ? '1' : '';
+    }
+    const showWarp = Boolean(state.showWarpHome && !state.atBase);
+    this.warpBtn.hidden = !showWarp;
+    if (showWarp) {
+      const waiting = state.warpCd > 0;
+      this.warpBtn.textContent = waiting ? 'ワープ待機' : '基地へワープ';
+      this.warpBtn.classList.toggle('is-broke', waiting);
+      this.warpBtn.dataset.broke = waiting ? '1' : '';
+    }
+    for (const btn of this.tabButtons) {
+      const on = btn.dataset.tab === this.tab;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    }
 
     if (state.combo >= 2 && state.comboAge < 0.9) {
       const fade = state.comboAge < 0.5 ? 1 : Math.max(0, 1 - (state.comboAge - 0.5) / 0.4);
@@ -175,7 +245,28 @@ export class UI {
       this.comboEl.hidden = true;
     }
 
-    const key = `${state.rawMoney}|${state.cutterLevel}|${state.tankLevel}|${state.propLevel}|${state.priceLevel}|${state.nearPad}`;
+    const fac = state.facilities || {};
+    const key = [
+      this.tab,
+      state.rawMoney,
+      state.cutterLevel,
+      state.depthLevel,
+      state.tankLevel,
+      state.propLevel,
+      state.priceLevel,
+      state.nearPad,
+      state.baseLevel,
+      fac.outpost,
+      fac.vacuum,
+      fac.drone,
+      fac.process,
+      fac.sonar,
+      fac.warp,
+      state.outposts?.length ?? 0,
+      state.outpostCap,
+      state.warpCd > 0 ? Math.ceil(state.warpCd) : 0,
+      state.decoyLevel,
+    ].join('|');
     if (key !== this.cardKey) {
       this.cardKey = key;
       this.renderCards(state);
@@ -185,11 +276,25 @@ export class UI {
   }
 
   renderCards(state) {
+    if (this.tab === 'facility') {
+      this.renderFacilities(state);
+      return;
+    }
+    if (this.tab === 'base') {
+      this.renderBase(state);
+      return;
+    }
+    this.renderGear(state);
+  }
+
+  renderGear(state) {
     const levels = {
       cutter: state.cutterLevel,
+      depth: state.depthLevel,
       tank: state.tankLevel,
       propeller: state.propLevel,
       price: state.priceLevel,
+      decoy: state.decoyLevel || 1,
     };
     let recommend = null;
     for (const def of UPGRADES) {
@@ -248,6 +353,138 @@ export class UI {
     }
   }
 
+  renderFacilities(state) {
+    const owned = state.facilities || {};
+    let recommend = null;
+    for (const def of FACILITIES) {
+      const level = owned[def.id] || 0;
+      const cost = facilityCost(def, level);
+      if (state.baseLevel >= def.need && level < def.max && cost != null && state.rawMoney >= cost) {
+        recommend = def.id;
+        break;
+      }
+    }
+    this.cards.replaceChildren();
+    for (const def of FACILITIES) {
+      const level = owned[def.id] || 0;
+      const locked = state.baseLevel < def.need;
+      const maxed = level >= def.max;
+      const cost = facilityCost(def, level);
+      const afford = !locked && !maxed && cost != null && state.rawMoney >= cost;
+      const broke = !locked && !maxed && !afford;
+      const card = document.createElement('article');
+      card.className = 'card';
+      if (locked) card.classList.add('is-locked');
+      if (recommend === def.id) card.classList.add('recommend');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.facility = def.id;
+      button.disabled = locked || maxed;
+      button.classList.toggle('is-broke', broke);
+      button.dataset.broke = broke ? '1' : '';
+      if (locked) button.textContent = `拠点Lv${def.need}`;
+      else if (maxed) button.textContent = '最大';
+      else if (broke) button.textContent = `${formatNumber(cost)} 不足`;
+      else button.textContent = `${level === 0 ? '建設' : '強化'} ${formatNumber(cost)}`;
+      button.style.background = afford ? def.color : '#3c5563';
+      const name = document.createElement('div');
+      name.className = 'card-name';
+      name.textContent = def.name;
+      name.style.color = def.color;
+      const lv = document.createElement('div');
+      lv.className = 'card-lv';
+      lv.textContent = `Lv.${level}`;
+      const top = document.createElement('div');
+      top.className = 'card-top';
+      top.append(name, lv);
+      const stat = document.createElement('div');
+      stat.className = 'card-stat';
+      stat.textContent = locked ? def.blurb : facilityStat(def.id, level);
+      const next = document.createElement('div');
+      next.className = 'card-next';
+      next.textContent = locked ? `拠点Lv${def.need}で解放` : facilityNext(def.id, level, def.max);
+      card.append(top, stat, next);
+      if (recommend === def.id) {
+        const badge = document.createElement('div');
+        badge.className = 'badge';
+        badge.textContent = 'おすすめ';
+        card.append(badge);
+      }
+      card.append(button);
+      this.cards.append(card);
+    }
+  }
+
+  renderBase(state) {
+    this.cards.replaceChildren();
+    const level = state.baseLevel || 1;
+    const cost = baseUpgradeCost(level);
+    const maxed = cost == null;
+    const afford = !maxed && state.rawMoney >= cost;
+    const broke = !maxed && !afford;
+    const card = document.createElement('article');
+    card.className = 'card';
+    const name = document.createElement('div');
+    name.className = 'card-name';
+    name.textContent = '拠点';
+    name.style.color = '#ffe56a';
+    const lv = document.createElement('div');
+    lv.className = 'card-lv';
+    lv.textContent = `Lv.${level}`;
+    const top = document.createElement('div');
+    top.className = 'card-top';
+    top.append(name, lv);
+    const stat = document.createElement('div');
+    stat.className = 'card-stat';
+    const cap = state.outpostCap || 0;
+    const owned = state.outposts?.length ?? 0;
+    stat.textContent = cap > 0 ? `納品 ${owned}/${cap}` : '納品 未解放';
+    const next = document.createElement('div');
+    next.className = 'card-next';
+    next.textContent = baseNextText(level);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.base = '1';
+    button.disabled = maxed;
+    button.classList.toggle('is-broke', broke);
+    button.dataset.broke = broke ? '1' : '';
+    button.textContent = maxed ? '最大' : broke ? `${formatNumber(cost)} 不足` : `昇格 ${formatNumber(cost)}`;
+    button.style.background = afford ? '#ffe56a' : '#3c5563';
+    card.append(top, stat, next, button);
+    this.cards.append(card);
+
+    const warpLevel = state.facilities?.warp || 0;
+    if (warpLevel < 1 || !state.outposts?.length) {
+      const note = document.createElement('article');
+      note.className = 'card';
+      const line = document.createElement('div');
+      line.className = 'card-stat';
+      line.textContent = warpLevel < 1 ? 'ワープは拠点Lv4' : '前線を建てるとワープできる';
+      note.append(line);
+      this.cards.append(note);
+      return;
+    }
+    state.outposts.forEach((spot, index) => {
+      const warpCard = document.createElement('article');
+      warpCard.className = 'card';
+      const title = document.createElement('div');
+      title.className = 'card-name';
+      title.textContent = `前線${index + 1}`;
+      const meta = document.createElement('div');
+      meta.className = 'card-stat';
+      meta.textContent = `${Math.round(spot.x)}, ${Math.round(spot.z)}`;
+      const warpBtn = document.createElement('button');
+      warpBtn.type = 'button';
+      warpBtn.dataset.warp = String(index);
+      const waiting = state.warpCd > 0;
+      warpBtn.disabled = waiting;
+      warpBtn.textContent = waiting ? `待機 ${Math.ceil(state.warpCd)}` : 'ワープ';
+      warpBtn.style.background = waiting ? '#3c5563' : '#ffe56a';
+      warpCard.append(title, meta, warpBtn);
+      this.cards.append(warpCard);
+    });
+  }
+
   updateStick(pointer) {
     if (!pointer?.active) {
       this.stick.hidden = true;
@@ -269,7 +506,7 @@ export class UI {
     const cx = w / 2;
     const cy = h / 2;
     const radius = w / 2 - 3;
-    const view = 120;
+    const view = MAP_VIEW;
     const scale = radius / view;
     c.clearRect(0, 0, w, h);
     c.save();
@@ -282,35 +519,68 @@ export class UI {
     const pz = state.z;
     const toX = (x) => cx + (x - px) * scale;
     const toY = (z) => cy + (z - pz) * scale;
-    const rings = [
-      { r: 48, color: 'rgba(190, 235, 150, 0.35)' },
-      { r: 102, color: 'rgba(255, 170, 185, 0.4)' },
-      { r: 156, color: 'rgba(150, 210, 255, 0.35)' },
-    ];
-    for (const ring of rings) {
+    const ringColors = ['rgba(190, 235, 150, 0.55)', 'rgba(255, 170, 185, 0.55)', 'rgba(150, 210, 255, 0.5)', 'rgba(90, 170, 210, 0.45)'];
+    c.beginPath();
+    c.arc(toX(0), toY(0), WORLD_LIMIT * scale, 0, Math.PI * 2);
+    c.strokeStyle = 'rgba(180, 220, 235, 0.28)';
+    c.lineWidth = 2;
+    c.stroke();
+    ZONE_RINGS.forEach((ring, index) => {
       c.beginPath();
-      c.arc(toX(0), toY(0), ring.r * scale, 0, Math.PI * 2);
-      c.strokeStyle = ring.color;
+      c.arc(toX(0), toY(0), ring.radius * scale, 0, Math.PI * 2);
+      c.strokeStyle = ringColors[index] || 'rgba(255,255,255,0.35)';
       c.lineWidth = 2;
       c.stroke();
-    }
+    });
     c.beginPath();
-    c.arc(toX(state.wreckX), toY(state.wreckZ), 26 * scale, 0, Math.PI * 2);
+    c.arc(toX(state.wreckX), toY(state.wreckZ), WRECK.radius * scale, 0, Math.PI * 2);
     c.strokeStyle = 'rgba(255, 214, 140, 0.8)';
     c.stroke();
-    const bx = toX(0);
-    const by = toY(0);
-    const bdx = bx - cx;
-    const bdy = by - cy;
-    const bd = Math.hypot(bdx, bdy);
-    c.fillStyle = '#ffe56a';
-    if (bd > radius - 10) {
-      const k = (radius - 12) / bd;
-      drawDiamond(c, cx + bdx * k, cy + bdy * k, 5);
-    } else {
+    c.fillStyle = 'rgba(190, 245, 255, 0.9)';
+    for (const mark of LANDMARKS) {
+      c.fillRect(toX(mark.x) - 1.5, toY(mark.z) - 1.5, 3, 3);
+    }
+    const plot = (x, z) => {
+      const tx = toX(x);
+      const ty = toY(z);
+      const dx = tx - cx;
+      const dy = ty - cy;
+      const dist = Math.hypot(dx, dy);
+      if (dist > radius - 10) {
+        const k = (radius - 12) / Math.max(dist, 0.001);
+        return [cx + dx * k, cy + dy * k];
+      }
+      return [tx, ty];
+    };
+    for (const mark of state.sonar || []) {
+      const [mx, my] = plot(mark.x, mark.z);
+      if (mark.kind === 'rare') {
+        c.fillStyle = '#fff6ea';
+        c.beginPath();
+        c.arc(mx, my, 2.5, 0, Math.PI * 2);
+        c.fill();
+      } else if (mark.kind === 'dig') {
+        c.fillStyle = '#d7b0ff';
+        c.fillRect(mx - 2.5, my - 2.5, 5, 5);
+      } else {
+        c.fillStyle = '#ffb020';
+        c.fillRect(mx - 3, my - 3, 6, 6);
+      }
+    }
+    if (state.threat) {
+      const [mx, my] = plot(state.threat.x, state.threat.z);
+      c.fillStyle = state.threat.hot ? '#ff4b3a' : '#ffb089';
       c.beginPath();
-      c.arc(bx, by, 5, 0, Math.PI * 2);
+      c.arc(mx, my, state.threat.hot ? 4.5 : 3, 0, Math.PI * 2);
       c.fill();
+    }
+    const [bx, by] = plot(0, 0);
+    c.fillStyle = '#ffe56a';
+    drawDiamond(c, bx, by, 5);
+    c.fillStyle = '#3ec8ff';
+    for (const spot of state.outposts || []) {
+      const [ox, oy] = plot(spot.x, spot.z);
+      drawDiamond(c, ox, oy, 4);
     }
     c.restore();
     c.beginPath();

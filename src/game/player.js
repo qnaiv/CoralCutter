@@ -220,6 +220,25 @@ export class Player {
     this.scene.add(this.shadow);
   }
 
+  placeAt(x, z) {
+    this.x = x;
+    this.z = z;
+    this.vx = 0;
+    this.vz = 0;
+    const gy = groundHeight(this.x, this.z);
+    this.root.position.set(this.x, gy, this.z);
+  }
+
+  /** Move to a clamped spot without clearing the slide along a gate. */
+  pin(x, z) {
+    this.x = x;
+    this.z = z;
+    const gy = groundHeight(this.x, this.z);
+    this.root.position.x = x;
+    this.root.position.z = z;
+    this.root.position.y = gy + Math.sin(this.bob) * 0.045;
+  }
+
   getCutterXZ() {
     return {
       x: this.x + Math.sin(this.angle) * this.cutterOffset,
