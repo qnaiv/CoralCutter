@@ -1,16 +1,12 @@
+import { vacuumRadius } from './economy.js';
+
 /**
- * Efficiency features are intentionally off. The harvest loop already goes
- * through Resources.harvestAround(x, z, radius, ...), so these can be enabled
- * later without rewriting cutting, cargo, or selling.
- *
- * - autoVacuum: also cut inside vacuumRadius around the sub
- * - transportDrone: ferry cargo back to the sell zone
- * - companionSub: a second cutter that calls harvestAround at its own position
- * - zoneWarp: pads that move the sub between zone gates
- *
- * Rewarded ads are out of scope for the prototype. Keep them optional and
- * never required to progress.
+ * Live switches written from owned facilities each frame.
+ * Vacuum harvests through Resources.harvestAround around the hull.
+ * The transport drone and warp have their own objects; these flags mirror
+ * ownership so the hooks stay truthful. Rewarded ads stay off.
  */
+
 export const features = {
   autoVacuum: false,
   vacuumRadius: 0,
@@ -19,3 +15,11 @@ export const features = {
   zoneWarp: false,
   rewardedAds: false,
 };
+
+export function applyFacilityFeatures(facilities) {
+  const radius = vacuumRadius(facilities?.vacuum || 0);
+  features.autoVacuum = radius > 0;
+  features.vacuumRadius = radius;
+  features.transportDrone = (facilities?.drone || 0) > 0;
+  features.zoneWarp = (facilities?.warp || 0) > 0;
+}

@@ -162,6 +162,28 @@ export class World {
     this.scene.add(this.beaconLight);
     this.colliders.push({ x: beaconPos.x, z: beaconPos.z, r: 0.7 });
 
+    this.pylons = [];
+    const pylonMat = new THREE.MeshLambertMaterial({ color: 0xf4f7f8, flatShading: true });
+    const lampMat = new THREE.MeshLambertMaterial({
+      color: 0xfff1b0,
+      emissive: 0xffc83d,
+      emissiveIntensity: 0.85,
+      flatShading: true,
+    });
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + 0.4;
+      const group = new THREE.Group();
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, 3.2, 5), pylonMat);
+      post.position.y = 1.6;
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.28, 6, 5), lampMat);
+      lamp.position.y = 3.3;
+      group.add(post, lamp);
+      group.position.set(Math.sin(a) * 11.4, 0, Math.cos(a) * 11.4);
+      group.visible = false;
+      this.scene.add(group);
+      this.pylons.push(group);
+    }
+
     this.padIcons = [];
     for (const pad of PADS) {
       const p = padPosition(pad);
@@ -419,6 +441,12 @@ export class World {
     });
   }
 
+  setBaseLevel(level) {
+    const shown = Math.max(0, Math.min(this.pylons.length, (level | 0) - 1));
+    for (let i = 0; i < this.pylons.length; i++) this.pylons[i].visible = i < shown;
+    if (this.beaconLight) this.beaconLight.intensity = 28 + shown * 6;
+  }
+
   pulseSell() {
     this.sellPulse = 1;
   }
@@ -496,15 +524,18 @@ export class World {
       b.mesh.material.opacity = 0.15 + (1 - b.y / 8) * 0.2;
     }
 
-    if (state.showArrow && state.dist > 8) {
-      const ang = Math.atan2(-state.x, -state.z);
+    const sellDist = state.sellDist ?? state.dist;
+    const sellX = state.sellX ?? 0;
+    const sellZ = state.sellZ ?? 0;
+    if (state.showArrow && sellDist > 8) {
+      const ang = Math.atan2(sellX - state.x, sellZ - state.z);
       const ahead = 2.7;
       const ax = state.x + Math.sin(ang) * ahead;
       const az = state.z + Math.cos(ang) * ahead;
       this.arrow.visible = true;
       this.arrow.position.set(ax, groundHeight(ax, az) + 0.2, az);
       // Shape tip is -Z after rotateX(-90°). Flip so it points along +Z at yaw 0,
-      // then yaw toward the base (atan2 matches the sub's facing).
+      // then yaw toward the nearest sell point (atan2 matches the sub's facing).
       this.arrow.rotation.y = ang + Math.PI;
       const s = 0.72 + Math.sin(time * 6) * 0.05;
       this.arrow.scale.setScalar(s);

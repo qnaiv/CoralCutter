@@ -1,3 +1,4 @@
+import { ECONOMY } from './economy.js';
 import { formatNum } from './math.js';
 
 export const SAVE_KEY = 'coral-cutter-save-v1';
@@ -138,7 +139,7 @@ export const UPGRADES = [
   },
 ];
 
-export const RESOURCE_TYPES = [
+const RESOURCE_TYPES_BASE = [
   {
     id: 'giantKelp',
     name: '巨大昆布',
@@ -292,6 +293,13 @@ export const RESOURCE_TYPES = [
     geo: 'seaweed',
   },
 ];
+
+function tunedResource(type) {
+  const extra = ECONOMY.resources[type.id];
+  return extra ? { ...type, ...extra } : type;
+}
+
+export const RESOURCE_TYPES = RESOURCE_TYPES_BASE.map(tunedResource);
 
 export function cutterStats(level) {
   return CUTTER_LEVELS[Math.max(0, Math.min(CUTTER_LEVELS.length, level) - 1)];

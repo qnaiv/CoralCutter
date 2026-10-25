@@ -6,9 +6,11 @@ import {
   POWER_NEED,
   PRICE_LEVELS,
   PROP_LEVELS,
+  SELL_RADIUS,
   TANK_LEVELS,
   UPGRADE_RADIUS,
   UPGRADES,
+  WORLD_LIMIT,
   WRECK,
   cutterStats,
   nearestPad,
@@ -18,7 +20,23 @@ import {
   tankCapacity,
 } from './constants.js';
 import { VIEW_ZOOM_MAX, VIEW_ZOOM_MIN, cameraRig } from './cameraRig.js';
-import { features } from './features.js';
+import { CargoDrone } from './drone.js';
+import {
+  BASE_MAX,
+  FACILITIES,
+  baseUpgradeCost,
+  droneStats,
+  facilityCost,
+  outpostArrival,
+  outpostBlocked,
+  outpostBuildCost,
+  outpostCap,
+  outpostSellRadius,
+  processMult,
+  warpCooldown,
+} from './economy.js';
+import { applyFacilityFeatures, features } from './features.js';
+import { Outposts } from './outposts.js';
 import { FX } from './fx.js';
 import { Input } from './input.js';
 import { clamp, damp, smoothstep } from './math.js';
@@ -43,6 +61,8 @@ export class Game {
       price: clamp(this.save.levels.price, 1, PRICE_LEVELS.length),
     };
     this.stats = { ...this.save.stats };
+    this.baseLevel = clamp(this.save.baseLevel || 1, 1, BASE_MAX);
+    this.facilities = { ...this.save.facilities };
     this.viewZoom = clamp(this.save.viewZoom ?? 1, VIEW_ZOOM_MIN, VIEW_ZOOM_MAX);
     this.zoom = this.viewZoom;
     this.tank = { cargo: 0, value: 0, pieces: [], warned: false };
@@ -90,6 +110,12 @@ export class Game {
     this.world = new World(this.scene);
     this.resources = new Resources(this.scene);
     this.targets = new BigTargets(this.scene);
+    this.outposts = new Outposts(this.scene, this.world.colliders);
+    this.outposts.load(this.save.outposts);
+    this.outposts.setSellRadius(outpostSellRadius(this.facilities.outpost));
+    this.drone = new CargoDrone(this.scene);
+    this.warpReadyAt = 0;
+    this.world.setBaseLevel(this.baseLevel);
     this.world.colliders.push(...this.targets.colliders());
     this.player = new Player(this.scene);
     this.fx = new FX(this.scene);
@@ -107,6 +133,11 @@ export class Game {
     this.ui.onReset = () => this.reset();
     this.ui.onToggleMute = () => this.toggleMute();
     this.ui.onBuy = (id) => this.buy(id);
+    this.ui.onFacility = (id) => this.buyFacility(id);
+    this.ui.onBase = () => this.upgradeBase();
+    this.ui.onWarp = (index) => this.warpTo(index);
+    this.ui.onBuild = () => this.placeOutpost();
+    this.ui.onWarpHome = () => this.warpHome();
     this.ui.onDeny = () => {
       this.audio.unlock();
       this.audio.playSfx('deny');
@@ -161,9 +192,12 @@ export class Game {
 
   snapshot() {
     return {
-      version: 1,
+      version: 2,
       money: this.money,
       levels: { ...this.levels },
+      baseLevel: this.baseLevel,
+      facilities: { ...this.facilities },
+      outposts: this.outposts.serialize(),
       stats: { ...this.stats },
       mute: this.audio.muted,
       bgm: Math.round(this.audio.bgm * 100),
@@ -272,7 +306,8 @@ export class Game {
     this.comboTime = this.time;
     if (this.combo > this.stats.bestCombo) this.stats.bestCombo = this.combo;
     const bonus = Math.min(0.3, Math.max(0, this.combo - 1) * 0.03);
-    const gain = Math.round(entity.value * (1 + bonus));
+    const mult = entity.prize ? 1 : processMult(this.facilities.process, entity.type?.id);
+    const gain = Math.round(entity.value * (1 + bonus) * mult);
     this.tank.cargo += entity.cargo;
     this.tank.value += gain;
     this.tank.pieces.push(entity.colorHex);
@@ -333,13 +368,29 @@ export class Game {
     this.statusUntil = this.time + seconds;
   }
 
-  trySell() {
-    const inside = Math.hypot(this.player.x, this.player.z) < 6;
-    if (inside && !this.wasInside) this.onEnterSell();
-    this.wasInside = inside;
+  insideSell(x, z) {
+    if (Math.hypot(x, z) < SELL_RADIUS) return { kind: 'base', x: 0, z: 0 };
+    const hit = this.outposts.contains(x, z);
+    if (hit) return { kind: 'outpost', x: hit.x, z: hit.z, ref: hit };
+    return null;
   }
 
-  onEnterSell() {
+  nearestSellPoint(x, z) {
+    let best = { x: 0, z: 0, d: Math.hypot(x, z), name: '基地' };
+    for (const entry of this.outposts.list) {
+      const dist = Math.hypot(x - entry.x, z - entry.z);
+      if (dist < best.d) best = { x: entry.x, z: entry.z, d: dist, name: '前線', ref: entry };
+    }
+    return best;
+  }
+
+  trySell() {
+    const hit = this.insideSell(this.player.x, this.player.z);
+    if (hit && !this.wasInside) this.onEnterSell(hit);
+    this.wasInside = Boolean(hit);
+  }
+
+  onEnterSell(hit) {
     if (this.tank.cargo <= 0) {
       if (!this.emptyHintShown && this.stats.cut === 0) {
         this.emptyHintShown = true;
@@ -360,7 +411,8 @@ export class Game {
     this.audio.playSfx('sell');
     this.fx.coins(this.player.x, 1.3, this.player.z);
     this.fx.bubbles(this.player.x, 0.6, this.player.z, 12);
-    this.world.pulseSell();
+    if (hit?.kind === 'outpost' && hit.ref) hit.ref.pulse = 0.45;
+    else this.world.pulseSell();
     this.shake = Math.max(this.shake, 0.48);
     buzz(28);
     this.persist();
@@ -400,6 +452,173 @@ export class Game {
     this.persist();
   }
 
+  atMainBase() {
+    return Math.hypot(this.player.x, this.player.z) <= UPGRADE_RADIUS;
+  }
+
+  upgradeBase() {
+    if (!this.atMainBase()) return;
+    const cost = baseUpgradeCost(this.baseLevel);
+    if (cost == null) return;
+    if (this.money < cost) {
+      this.audio.unlock();
+      this.audio.playSfx('deny');
+      return;
+    }
+    this.money -= cost;
+    this.baseLevel += 1;
+    this.world.setBaseLevel(this.baseLevel);
+    this.ui.toast(`拠点Lv${this.baseLevel}`, 'good');
+    this.ui.bumpMoney();
+    this.audio.playSfx('buy');
+    this.fx.bubbles(0, 1, 0, 10);
+    this.shake = Math.max(this.shake, 0.2);
+    buzz(12);
+    this.persist();
+  }
+
+  buyFacility(id) {
+    if (!this.atMainBase()) return;
+    const def = FACILITIES.find((entry) => entry.id === id);
+    if (!def) return;
+    if (this.baseLevel < def.need) {
+      this.audio.playSfx('deny');
+      return;
+    }
+    const level = this.facilities[id] || 0;
+    if (level >= def.max) return;
+    const cost = facilityCost(def, level);
+    if (cost == null) return;
+    if (this.money < cost) {
+      this.audio.unlock();
+      this.audio.playSfx('deny');
+      return;
+    }
+    this.money -= cost;
+    this.facilities[id] = level + 1;
+    if (id === 'outpost') this.outposts.setSellRadius(outpostSellRadius(this.facilities.outpost));
+    this.ui.toast(`${def.name} Lv${this.facilities[id]}`, 'good');
+    this.ui.bumpMoney();
+    this.audio.playSfx('buy');
+    this.fx.bubbles(this.player.x, 1, this.player.z, 8);
+    this.shake = Math.max(this.shake, 0.16);
+    buzz(12);
+    this.persist();
+  }
+
+  placeOutpost() {
+    const cap = outpostCap(this.baseLevel, this.facilities.outpost);
+    if (this.facilities.outpost < 1 || this.outposts.list.length >= cap) return;
+    const x = this.player.x;
+    const z = this.player.z;
+    if (outpostBlocked(x, z, this.outposts.list, WORLD_LIMIT, this.world.colliders)) return;
+    const cost = outpostBuildCost(this.outposts.list.length, this.facilities.outpost);
+    if (this.money < cost) {
+      this.audio.unlock();
+      this.audio.playSfx('deny');
+      return;
+    }
+    this.money -= cost;
+    this.outposts.add(x, z);
+    this.ui.toast('前線基地を建てた', 'good');
+    this.ui.bumpMoney();
+    this.audio.playSfx('buy');
+    this.fx.bubbles(x, 1.2, z, 10);
+    this.shake = Math.max(this.shake, 0.2);
+    buzz(16);
+    this.persist();
+  }
+
+  movePlayer(x, z) {
+    this.player.placeAt(x, z);
+    this.wasInside = Boolean(this.insideSell(x, z));
+    const zone = zoneAt(x, z);
+    if (zone.id !== this.zone.id) {
+      this.zone = zone;
+      this.audio.setZone(zone.id);
+    }
+  }
+
+  armWarp() {
+    this.warpReadyAt = this.time + warpCooldown(this.facilities.warp);
+  }
+
+  warpTo(index) {
+    if (!this.atMainBase()) return;
+    if (this.facilities.warp < 1) return;
+    if (this.time < this.warpReadyAt) {
+      this.audio.playSfx('deny');
+      return;
+    }
+    const entry = this.outposts.list[index];
+    if (!entry) return;
+    const spot = outpostArrival(entry, this.outposts.radius);
+    this.movePlayer(spot.x, spot.z);
+    this.armWarp();
+    this.ui.toast('前線基地へ', 'info');
+    this.audio.playSfx('zone', { deeper: true });
+  }
+
+  warpHome() {
+    if (this.facilities.warp < 3) return;
+    if (this.time < this.warpReadyAt) {
+      this.audio.playSfx('deny');
+      return;
+    }
+    const near = this.outposts.nearest(this.player.x, this.player.z);
+    if (!near || near.d > 14) return;
+    const dist = Math.hypot(this.player.x, this.player.z) || 1;
+    this.movePlayer((this.player.x / dist) * 10, (this.player.z / dist) * 10);
+    this.armWarp();
+    this.ui.toast('基地へ戻った', 'info');
+    this.audio.playSfx('zone', { deeper: false });
+  }
+
+  deliverDrone(value, x, z) {
+    const payout = Math.max(1, Math.round(value * priceMult(this.levels.price)));
+    this.money += payout;
+    this.stats.earned += payout;
+    this.ui.toast(`ドローン +${payout.toLocaleString('ja-JP')}`, 'good');
+    this.ui.bumpMoney();
+    this.audio.playSfx('sell');
+    this.fx.coins(x, 1.6, z);
+    this.persist();
+  }
+
+  sonarMarkers() {
+    const level = this.facilities.sonar || 0;
+    if (level < 1) return [];
+    const marks = [];
+    for (const target of this.targets.list) {
+      if (target.state === 'gone') continue;
+      marks.push({ x: target.x, z: target.z, kind: 'big' });
+    }
+    if (level >= 2) {
+      const rares = [];
+      for (const entity of this.resources.entities) {
+        if (entity.state !== 'alive') continue;
+        if (entity.type?.id !== 'pearl' && !entity.type?.rare) continue;
+        rares.push({
+          x: entity.x,
+          z: entity.z,
+          kind: 'rare',
+          d: Math.hypot(entity.x - this.player.x, entity.z - this.player.z),
+        });
+      }
+      rares.sort((a, b) => a.d - b.d);
+      for (const rare of rares.slice(0, 6)) marks.push(rare);
+    }
+    if (level >= 3 && this.activities?.digs) {
+      const digs = Array.isArray(this.activities.digs) ? this.activities.digs : [];
+      for (const dig of digs) {
+        if (!dig || dig.done || dig.state === 'done' || dig.state === 'gone') continue;
+        if (!Number.isFinite(dig.x) || !Number.isFinite(dig.z)) continue;
+        marks.push({ x: dig.x, z: dig.z, kind: 'dig' });
+      }
+    }
+    return marks;
+  }
+
   update(dt) {
     this.time += dt;
     this.zoom = damp(this.zoom, this.viewZoom, 12, dt);
@@ -426,6 +645,7 @@ export class Game {
       }
       this.trySell();
       this.frameCutMode = 'idle';
+      applyFacilityFeatures(this.facilities);
       const cpos = this.player.getCutterXZ();
       this.resources.harvestAround(cpos.x, cpos.z, cutter.range, cutter.damage, cutter.power, this.harvest);
       this.targets.harvestAround(cpos.x, cpos.z, cutter.range, cutter.damage, cutter.power, this.harvest);
@@ -451,8 +671,20 @@ export class Game {
         const nozzle = this.player.getNozzle();
         this.fx.bubbles(nozzle.x, nozzle.y, nozzle.z, 1);
       }
+      this.drone.update(dt, {
+        active: document.visibilityState !== 'hidden',
+        stats: droneStats(this.facilities.drone),
+        tank: this.tank,
+        x: this.player.x,
+        z: this.player.z,
+        inside: Boolean(this.insideSell(this.player.x, this.player.z)),
+        time: this.time,
+        dest: this.nearestSellPoint(this.player.x, this.player.z),
+        onDeliver: (value, x, z) => this.deliverDrone(value, x, z),
+      });
     }
 
+    this.outposts.update(dt, this.time);
     this.resources.update(dt, this.time);
     this.targets.update(dt, this.time, {
       x: this.player.x,
@@ -460,11 +692,15 @@ export class Game {
       power: cutter.power,
     });
     const dist = Math.hypot(this.player.x, this.player.z);
+    const sell = this.nearestSellPoint(this.player.x, this.player.z);
     const cap = tankCapacity(this.levels.tank);
     this.world.update(dt, this.time, {
       x: this.player.x,
       z: this.player.z,
       dist,
+      sellX: sell.x,
+      sellZ: sell.z,
+      sellDist: sell.d,
       showArrow: this.started && cap > 0 && this.tank.cargo / cap >= 0.75,
       viewScale: this.rig?.distScale ?? 1,
       indicatorScale: this.rig?.indicatorScale ?? 1,
@@ -508,6 +744,21 @@ export class Game {
         showMoveHint: !this.movedOnce && this.playTime > 0.3,
         pointer: this.input.pointer,
         hint: this.time < this.statusUntil ? this.statusHint : '',
+        baseLevel: this.baseLevel,
+        facilities: this.facilities,
+        outposts: this.outposts.list,
+        outpostCap: outpostCap(this.baseLevel, this.facilities.outpost),
+        canBuild:
+          this.facilities.outpost >= 1 &&
+          this.outposts.list.length < outpostCap(this.baseLevel, this.facilities.outpost) &&
+          !outpostBlocked(this.player.x, this.player.z, this.outposts.list, WORLD_LIMIT, this.world.colliders),
+        buildCost: outpostBuildCost(this.outposts.list.length, this.facilities.outpost),
+        buildBroke: this.money < outpostBuildCost(this.outposts.list.length, this.facilities.outpost),
+        sellDist: sell.d,
+        sellName: sell.name,
+        showWarpHome: (this.facilities.warp || 0) >= 3 && (this.outposts.nearest(this.player.x, this.player.z)?.d ?? 99) <= 14,
+        warpCd: Math.max(0, this.warpReadyAt - this.time),
+        sonar: this.sonarMarkers(),
       });
     }
 

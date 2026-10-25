@@ -220,6 +220,15 @@ export class Player {
     this.scene.add(this.shadow);
   }
 
+  placeAt(x, z) {
+    this.x = x;
+    this.z = z;
+    this.vx = 0;
+    this.vz = 0;
+    const gy = groundHeight(this.x, this.z);
+    this.root.position.set(this.x, gy, this.z);
+  }
+
   getCutterXZ() {
     return {
       x: this.x + Math.sin(this.angle) * this.cutterOffset,
