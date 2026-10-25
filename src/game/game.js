@@ -95,6 +95,7 @@ export class Game {
     this.fx = new FX(this.scene);
     this.audio = new AudioBus();
     this.audio.setMuted(this.save.mute);
+    this.audio.setZone(this.zone.id);
     this.input = new Input();
     this.input.unlock = () => this.audio.unlock();
     this.input.onZoom = (factor) => this.nudgeZoom(factor);
@@ -105,6 +106,14 @@ export class Game {
     this.ui.onReset = () => this.reset();
     this.ui.onToggleMute = () => this.toggleMute();
     this.ui.onBuy = (id) => this.buy(id);
+    this.ui.onDeny = () => {
+      this.audio.unlock();
+      this.audio.playSfx('deny');
+    };
+    this.ui.onUi = () => {
+      this.audio.unlock();
+      this.audio.playSfx('ui');
+    };
     this.ui.muteBtn.textContent = this.audio.muted ? '音OFF' : '音ON';
     this.harvest = {
       canTake: (cost) => this.tank.cargo + cost <= tankCapacity(this.levels.tank),
@@ -115,8 +124,15 @@ export class Game {
     this.onResize = () => this.resize();
     window.addEventListener('resize', this.onResize);
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') this.persist();
+      if (document.visibilityState === 'hidden') {
+        this.persist();
+        this.audio.pause();
+      } else {
+        this.audio.resume();
+      }
     });
+    window.addEventListener('pagehide', () => this.audio.pause());
+    window.addEventListener('pageshow', () => this.audio.resume());
     window.addEventListener('beforeunload', () => this.persist());
     this.resize();
 
@@ -173,6 +189,7 @@ export class Game {
     this.started = true;
     this.input.enabled = true;
     this.audio.unlock();
+    this.audio.setZone(this.zone.id);
     this.ui.showPlaying();
     this.playTime = 0;
     this.ui.toast('海藻を刈って、基地の円で売ろう', 'info');
@@ -185,8 +202,15 @@ export class Game {
   }
 
   toggleMute() {
+    const next = !this.audio.muted;
     this.audio.unlock();
-    this.audio.setMuted(!this.audio.muted);
+    if (next) {
+      this.audio.playSfx('ui');
+      this.audio.setMuted(true);
+    } else {
+      this.audio.setMuted(false, true);
+      this.audio.playSfx('ui');
+    }
     this.ui.muteBtn.textContent = this.audio.muted ? '音OFF' : '音ON';
     this.persist();
   }
@@ -231,7 +255,7 @@ export class Game {
   onHit(entity, killed) {
     this.registerContact('cut');
     if (!killed) {
-      this.audio.cut();
+      this.audio.playSfx(entity.prize ? 'bigHit' : 'cut');
       return;
     }
     if (this.time - this.comboTime < 0.7) this.combo += 1;
@@ -248,7 +272,7 @@ export class Game {
     if (entity.prize) {
       for (let i = 0; i < 8; i++) this.tank.pieces.push(entity.colorHex);
       if (this.tank.pieces.length > 36) this.tank.pieces.splice(0, this.tank.pieces.length - 36);
-      this.audio.shatter();
+      this.audio.playSfx('bigBreak');
       this.fx.chunks(entity.x, entity.y + 1.2, entity.z, entity.colorHex, 12);
       this.fx.coins(entity.x, entity.y + 1.4, entity.z);
       this.fx.bubbles(entity.x, entity.y + 0.6, entity.z, 16);
@@ -257,8 +281,9 @@ export class Game {
       buzz(30);
     } else {
       const big = entity.maxHp >= 40;
-      if (big) this.audio.shatter();
-      else this.audio.cut();
+      if (big) this.audio.playSfx('shatter');
+      else this.audio.playSfx('cut');
+      this.audio.playSfx('pickup');
       this.fx.chunks(entity.x, entity.y + 0.7, entity.z, entity.colorHex, big ? 6 : 3);
       if (big) {
         this.shake = Math.max(this.shake, 0.3);
@@ -269,14 +294,14 @@ export class Game {
     if (this.tank.cargo >= cap && !this.tank.warned) {
       this.tank.warned = true;
       this.ui.toast('タンクが満タン！基地に戻ろう', 'info');
-      this.audio.full();
+      this.audio.playSfx('full');
     }
   }
 
   onReject(entity, reason) {
     if (reason === 'hard') {
       this.registerContact('clank');
-      this.audio.clank();
+      this.audio.playSfx('clank');
       this.fx.sparks(entity.x, entity.y + 0.7, entity.z);
       if (this.time > this.hardHintAt + 1.7) {
         this.hardHintAt = this.time;
@@ -323,7 +348,7 @@ export class Game {
     this.combo = 0;
     this.ui.toast(`売却 +${payout.toLocaleString('ja-JP')}`, 'good');
     this.ui.bumpMoney();
-    this.audio.sell();
+    this.audio.playSfx('sell');
     this.fx.coins(this.player.x, 1.3, this.player.z);
     this.fx.bubbles(this.player.x, 0.6, this.player.z, 12);
     this.world.pulseSell();
@@ -339,7 +364,12 @@ export class Game {
     const level = this.levels[id];
     if (level >= def.max) return;
     const cost = def.cost(level);
-    if (cost == null || this.money < cost) return;
+    if (cost == null) return;
+    if (this.money < cost) {
+      this.audio.unlock();
+      this.audio.playSfx('deny');
+      return;
+    }
     this.money -= cost;
     this.levels[id] += 1;
     let message = `${def.name}を強化した`;
@@ -349,7 +379,7 @@ export class Game {
     if (id === 'price') message = `売値が ×${priceMult(this.levels.price).toFixed(2)} になった`;
     this.ui.toast(message, 'good');
     this.ui.bumpMoney();
-    this.audio.buy();
+    this.audio.playSfx('buy');
     const pad = PADS.find((entry) => entry.id === id);
     if (pad) {
       const pos = padPosition(pad);
@@ -379,8 +409,11 @@ export class Game {
       const zone = zoneAt(this.player.x, this.player.z);
       if (zone.id !== this.zone.id) {
         const prev = this.zone;
+        const deeper = zone.rank > prev.rank;
         this.zone = zone;
-        if (zone.rank > prev.rank) this.ui.toast(zone.enter, 'info');
+        this.audio.setZone(zone.id);
+        this.audio.playSfx('zone', { deeper });
+        if (deeper) this.ui.toast(zone.enter, 'info');
       }
       this.trySell();
       this.frameCutMode = 'idle';
@@ -469,6 +502,7 @@ export class Game {
       });
     }
 
+    this.audio.update();
     this.renderer.render(this.scene, this.camera);
     if (this.debug) {
       this.fpsAcc += dt;
