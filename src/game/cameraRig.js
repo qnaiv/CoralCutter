@@ -18,6 +18,14 @@ const OLD_WIDTH_PER_ASPECT = 21.83;
 /** Default pullback on wide screens: about 1.85× the old ground area. */
 const AREA_PULL = 1.85;
 
+/**
+ * 1 is the pulled-back default. The near end is a little closer than the
+ * original camera (about 0.9× its distance). The far end is about 1.4×
+ * farther than the new default.
+ */
+export const VIEW_ZOOM_MIN = 0.66;
+export const VIEW_ZOOM_MAX = 1.42;
+
 const _cam = new THREE.PerspectiveCamera(42, 1, 0.1, 500);
 const _hit = new THREE.Vector3();
 
@@ -55,13 +63,14 @@ function previousWidth(aspect) {
  * Wide screens sit at ~1.85× the old visible area. Narrower frames raise the
  * camera further so the seabed strip across the short side does not collapse.
  */
-export function cameraRig(aspect) {
+export function cameraRig(aspect, zoom = 1) {
   const safeAspect = clamp(aspect, 0.35, 3.2);
+  const z = clamp(Number.isFinite(zoom) ? zoom : 1, VIEW_ZOOM_MIN, VIEW_ZOOM_MAX);
   const wideWidth = OLD_WIDTH_PER_ASPECT * safeAspect * Math.sqrt(AREA_PULL);
   const squeeze = smoothstep(1.22, 0.5, safeAspect);
   const widthBoost = 1 + squeeze * 0.9;
   const targetWidth = wideWidth * widthBoost;
-  const distScale = targetWidth / (OLD_WIDTH_PER_ASPECT * safeAspect);
+  const distScale = (targetWidth / (OLD_WIDTH_PER_ASPECT * safeAspect)) * z;
   const dist = OLD_DIST * distScale;
   const shownBefore = previousWidth(safeAspect);
   return {
@@ -71,6 +80,7 @@ export function cameraRig(aspect) {
     lift: LIFT,
     lookY: LOOK_Y,
     distScale,
-    indicatorScale: targetWidth / shownBefore,
+    zoom: z,
+    indicatorScale: (targetWidth * z) / shownBefore,
   };
 }

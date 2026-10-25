@@ -1,3 +1,4 @@
+import { VIEW_ZOOM_MAX, VIEW_ZOOM_MIN } from './cameraRig.js';
 import { SAVE_KEY } from './constants.js';
 
 export function defaultSave() {
@@ -7,6 +8,7 @@ export function defaultSave() {
     levels: { cutter: 1, tank: 1, propeller: 1, price: 1 },
     stats: { cut: 0, earned: 0, bestCombo: 0 },
     mute: false,
+    viewZoom: 1,
   };
 }
 
@@ -27,6 +29,10 @@ export function loadSave() {
     base.stats.earned = Math.max(0, Number(data.stats?.earned) || 0);
     base.stats.bestCombo = Math.max(0, Number(data.stats?.bestCombo) || 0);
     base.mute = Boolean(data.mute);
+    const zoom = Number(data.viewZoom);
+    if (Number.isFinite(zoom)) {
+      base.viewZoom = Math.max(VIEW_ZOOM_MIN, Math.min(VIEW_ZOOM_MAX, zoom));
+    }
     return base;
   } catch {
     return base;
