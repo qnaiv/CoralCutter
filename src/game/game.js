@@ -3,6 +3,7 @@ import { Activities } from './activities.js';
 import { AudioBus } from './audio.js';
 import {
   CUTTER_LEVELS,
+  DECOY_LEVELS,
   DEPTH_LEVELS,
   PADS,
   POWER_NEED,
@@ -16,6 +17,7 @@ import {
   WORLD_LIMIT,
   WRECK,
   cutterStats,
+  decoyKeep,
   nearestPad,
   padPosition,
   priceMult,
@@ -51,6 +53,7 @@ import { Resources } from './resources.js';
 import { BigTargets } from './targets.js';
 import { clearSave, loadSave, writeSave } from './save.js';
 import { zoneAt, zoneForPlayer } from './terrain.js';
+import { THREAT, Threats, threatName } from './threats.js';
 import { UI } from './ui.js';
 import { World } from './world.js';
 
@@ -66,6 +69,7 @@ export class Game {
       propeller: clamp(this.save.levels.propeller, 1, PROP_LEVELS.length),
       price: clamp(this.save.levels.price, 1, PRICE_LEVELS.length),
       depth: clamp(this.save.levels.depth || 1, 1, DEPTH_LEVELS.length),
+      decoy: clamp(this.save.levels.decoy ?? 1, 1, DECOY_LEVELS.length),
     };
     this.stats = { ...this.save.stats };
     this.baseLevel = clamp(this.save.baseLevel || 1, 1, BASE_MAX);
@@ -121,6 +125,7 @@ export class Game {
     this.resources = new Resources(this.scene);
     this.activities = new Activities(this.scene);
     this.targets = new BigTargets(this.scene);
+    this.threats = new Threats(this.scene);
     this.outposts = new Outposts(this.scene, this.world.colliders);
     this.outposts.load(this.save.outposts);
     this.outposts.setSellRadius(outpostSellRadius(this.facilities.outpost));
@@ -486,6 +491,51 @@ export class Game {
     this.persist();
   }
 
+  stealCargo(kind) {
+    const cargo = this.tank.cargo;
+    if (cargo <= 0) return null;
+    let take = Math.round(cargo * THREAT.stealFraction);
+    take = Math.min(cargo, THREAT.stealMax, Math.max(THREAT.stealMin, take));
+    const keep = decoyKeep(this.levels.decoy);
+    take = Math.min(cargo, Math.max(1, Math.round(take * (1 - keep))));
+    if (take < 1) return null;
+    const ratio = take / cargo;
+    const color = this.tank.pieces[this.tank.pieces.length - 1] ?? 0x7af6ff;
+    const value = this.tank.value * ratio;
+    this.tank.cargo -= take;
+    this.tank.value = Math.max(0, this.tank.value - value);
+    if (this.tank.cargo <= 0) {
+      this.tank.cargo = 0;
+      this.tank.value = 0;
+      this.tank.pieces.length = 0;
+      this.tank.warned = false;
+    } else {
+      const drop = Math.min(this.tank.pieces.length, Math.max(1, Math.round(this.tank.pieces.length * ratio)));
+      if (drop > 0) this.tank.pieces.splice(0, drop);
+    }
+    this.audio.playSfx('steal');
+    this.ui.toast(`${threatName(kind)}に奪われた`, 'bad');
+    this.fx.chunks(this.player.x, 1.1, this.player.z, color, 5);
+    this.shake = Math.max(this.shake, 0.4);
+    buzz(18);
+    return { cargo: take, value, color };
+  }
+
+  recoverCargo(stolen) {
+    if (!stolen) return;
+    this.tank.cargo += stolen.cargo;
+    const bonus = Math.max(0, Math.round(stolen.value * THREAT.recoverBonus));
+    this.tank.value += stolen.value + bonus;
+    for (let i = 0; i < Math.min(8, stolen.cargo); i++) this.tank.pieces.push(stolen.color);
+    if (this.tank.pieces.length > 36) this.tank.pieces.splice(0, this.tank.pieces.length - 36);
+    this.audio.playSfx('cut');
+    this.audio.playSfx('pickup');
+    this.ui.toast('取り返した', 'good');
+    this.fx.chunks(this.player.x, 1.2, this.player.z, stolen.color, 6);
+    this.shake = Math.max(this.shake, 0.28);
+    buzz(12);
+  }
+
   buy(id) {
     if (Math.hypot(this.player.x, this.player.z) > UPGRADE_RADIUS) return;
     const def = UPGRADES.find((entry) => entry.id === id);
@@ -512,6 +562,7 @@ export class Game {
     if (id === 'tank') message = `タンク容量 ${tankCapacity(this.levels.tank)}`;
     if (id === 'propeller') message = '速度が上がった！';
     if (id === 'price') message = `売値が ×${priceMult(this.levels.price).toFixed(2)} になった`;
+    if (id === 'decoy') message = 'デコイで奪われにくくなった';
     this.ui.toast(message, 'good');
     this.ui.bumpMoney();
     this.audio.playSfx('buy');
@@ -752,6 +803,7 @@ export class Game {
         this.audio.playSfx('zone', { deeper });
         if (deeper) this.ui.toast(zone.enter, 'info');
         this.inFarDeep = zone.id === 'deep' && far;
+        if (zone.id === 'deep' || zone.id === 'wreck') this.threats.enterZone();
       } else if (zone.id === 'deep' && far && !this.inFarDeep) {
         this.inFarDeep = true;
         this.ui.toast('深海の奥へ入った', 'info');
@@ -765,6 +817,20 @@ export class Game {
       const cpos = this.player.getCutterXZ();
       this.resources.harvestAround(cpos.x, cpos.z, cutter.range, cutter.damage, cutter.power, this.harvest);
       this.targets.harvestAround(cpos.x, cpos.z, cutter.range, cutter.damage, cutter.power, this.harvest);
+      this.threats.update(dt, {
+        playing: true,
+        x: this.player.x,
+        z: this.player.z,
+        zone: this.zone.id,
+        cargo: this.tank.cargo,
+        cutterX: cpos.x,
+        cutterZ: cpos.z,
+        cutterRange: cutter.range,
+        time: this.time,
+        onWarn: () => this.audio.playSfx('warn'),
+        onSteal: (kind) => this.stealCargo(kind),
+        onRecover: (stolen) => this.recoverCargo(stolen),
+      });
       if (features.autoVacuum && features.vacuumRadius > 0) {
         this.resources.harvestAround(
           this.player.x,
@@ -855,6 +921,7 @@ export class Game {
         tankLevel: this.levels.tank,
         propLevel: this.levels.propeller,
         priceLevel: this.levels.price,
+        decoyLevel: this.levels.decoy,
         tankCargo: this.tank.cargo,
         tankCap: cap,
         payout: Math.round(this.tank.value * priceMult(this.levels.price)),
@@ -888,6 +955,7 @@ export class Game {
         showWarpHome: (this.facilities.warp || 0) >= 3 && (this.outposts.nearest(this.player.x, this.player.z)?.d ?? 99) <= 14,
         warpCd: Math.max(0, this.warpReadyAt - this.time),
         sonar: this.sonarMarkers(),
+        threat: this.threats.marker(),
       });
     }
 

@@ -28,7 +28,7 @@ export function defaultSave() {
   return {
     version: 3,
     money: 0,
-    levels: { cutter: 1, tank: 1, propeller: 1, price: 1, depth: 1 },
+    levels: { cutter: 1, tank: 1, propeller: 1, price: 1, depth: 1, decoy: 1 },
     baseLevel: 1,
     facilities: emptyFacilities(),
     outposts: [],

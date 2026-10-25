@@ -5,7 +5,7 @@
  *
  * playSfx(name, opts?) names:
  * cut, pickup (alias vacuum), full, sell, buy, deny, zone, ui, clank,
- * shatter, bigHit, bigBreak, catch, bonk, pearl, tow, dig.
+ * shatter, bigHit, bigBreak, catch, bonk, pearl, tow, dig, warn, steal.
  * `zone` takes `{ deeper: boolean }`.
  */
 
@@ -702,5 +702,18 @@ const SFX = {
     bus._noise({ dur: 0.28, gain: 0.07, freq: 140, q: 0.4, priority: 3 });
     bus._tone({ freq: 78, dur: 0.24, type: 'sine', gain: 0.08, slide: -22, priority: 3 });
     bus._noise({ dur: 0.12, gain: 0.04, freq: 260, q: 0.7, delay: 0.08, priority: 2 });
+  },
+  warn(bus) {
+    if (!bus._gap('warn', 0.35)) return;
+    bus._duck(0.86, 0.28);
+    bus._tone({ freq: 494, dur: 0.12, type: 'sine', gain: 0.07, slide: 160, attack: 0.008, priority: 4 });
+    bus._tone({ freq: 698, dur: 0.16, type: 'triangle', gain: 0.05, delay: 0.11, slide: 70, priority: 4 });
+  },
+  steal(bus) {
+    if (!bus._gap('steal', 0.22)) return;
+    bus._duck(0.8, 0.32);
+    bus._noise({ dur: 0.11, gain: 0.07, freq: 220, q: 0.6, priority: 4 });
+    bus._tone({ freq: 176, dur: 0.15, type: 'triangle', gain: 0.09, slide: -80, priority: 4 });
+    bus._tone({ freq: 92, dur: 0.18, type: 'sine', gain: 0.055, delay: 0.04, slide: -28, priority: 3 });
   },
 };
