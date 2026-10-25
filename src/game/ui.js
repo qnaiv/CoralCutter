@@ -1,4 +1,14 @@
-import { UPGRADES, buyLabel, canCutText, objectiveFor } from './constants.js';
+import {
+  LANDMARKS,
+  MAP_VIEW,
+  UPGRADES,
+  WORLD_LIMIT,
+  WRECK,
+  ZONE_RINGS,
+  buyLabel,
+  canCutText,
+  objectiveFor,
+} from './constants.js';
 import { FACILITIES, baseNextText, baseUpgradeCost, facilityCost, facilityNext, facilityStat } from './economy.js';
 import { formatNum as formatNumber } from './math.js';
 
@@ -171,7 +181,7 @@ export class UI {
 
   sync(state) {
     this.moneyEl.textContent = formatNumber(state.money);
-    this.objectiveEl.textContent = objectiveFor(state.cutterLevel);
+    this.objectiveEl.textContent = objectiveFor(state.cutterLevel, state.depthLevel);
     this.canCutEl.textContent = canCutText(state.cutterLevel);
     this.zoneEl.textContent = state.zone;
     const ratio = state.tankCap > 0 ? state.tankCargo / state.tankCap : 0;
@@ -240,6 +250,7 @@ export class UI {
       this.tab,
       state.rawMoney,
       state.cutterLevel,
+      state.depthLevel,
       state.tankLevel,
       state.propLevel,
       state.priceLevel,
@@ -278,6 +289,7 @@ export class UI {
   renderGear(state) {
     const levels = {
       cutter: state.cutterLevel,
+      depth: state.depthLevel,
       tank: state.tankLevel,
       propeller: state.propLevel,
       price: state.priceLevel,
@@ -492,7 +504,7 @@ export class UI {
     const cx = w / 2;
     const cy = h / 2;
     const radius = w / 2 - 3;
-    const view = 120;
+    const view = MAP_VIEW;
     const scale = radius / view;
     c.clearRect(0, 0, w, h);
     c.save();
@@ -505,22 +517,27 @@ export class UI {
     const pz = state.z;
     const toX = (x) => cx + (x - px) * scale;
     const toY = (z) => cy + (z - pz) * scale;
-    const rings = [
-      { r: 48, color: 'rgba(190, 235, 150, 0.35)' },
-      { r: 102, color: 'rgba(255, 170, 185, 0.4)' },
-      { r: 156, color: 'rgba(150, 210, 255, 0.35)' },
-    ];
-    for (const ring of rings) {
+    const ringColors = ['rgba(190, 235, 150, 0.55)', 'rgba(255, 170, 185, 0.55)', 'rgba(150, 210, 255, 0.5)', 'rgba(90, 170, 210, 0.45)'];
+    c.beginPath();
+    c.arc(toX(0), toY(0), WORLD_LIMIT * scale, 0, Math.PI * 2);
+    c.strokeStyle = 'rgba(180, 220, 235, 0.28)';
+    c.lineWidth = 2;
+    c.stroke();
+    ZONE_RINGS.forEach((ring, index) => {
       c.beginPath();
-      c.arc(toX(0), toY(0), ring.r * scale, 0, Math.PI * 2);
-      c.strokeStyle = ring.color;
+      c.arc(toX(0), toY(0), ring.radius * scale, 0, Math.PI * 2);
+      c.strokeStyle = ringColors[index] || 'rgba(255,255,255,0.35)';
       c.lineWidth = 2;
       c.stroke();
-    }
+    });
     c.beginPath();
-    c.arc(toX(state.wreckX), toY(state.wreckZ), 26 * scale, 0, Math.PI * 2);
+    c.arc(toX(state.wreckX), toY(state.wreckZ), WRECK.radius * scale, 0, Math.PI * 2);
     c.strokeStyle = 'rgba(255, 214, 140, 0.8)';
     c.stroke();
+    c.fillStyle = 'rgba(190, 245, 255, 0.9)';
+    for (const mark of LANDMARKS) {
+      c.fillRect(toX(mark.x) - 1.5, toY(mark.z) - 1.5, 3, 3);
+    }
     const plot = (x, z) => {
       const tx = toX(x);
       const ty = toY(z);
