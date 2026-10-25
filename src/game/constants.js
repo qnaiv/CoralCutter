@@ -331,11 +331,11 @@ export function nearestPad(x, z) {
 }
 
 export function objectiveFor(cutterLevel) {
-  if (cutterLevel < 2) return '目標: 海藻を売ってカッターLv2へ';
-  if (cutterLevel < 4) return '目標: 昆布を刈ってサンゴの海域へ';
-  if (cutterLevel < 6) return '目標: サンゴを刈って沈没船へ';
-  if (cutterLevel < 8) return '目標: 深海サンゴを切断できるカッターへ';
-  return 'すべての海域を切断できる';
+  if (cutterLevel < 2) return '目標: でかい海藻を刈ってカッターLv2へ';
+  if (cutterLevel < 4) return '目標: 昆布の幹を刈ってサンゴへ';
+  if (cutterLevel < 6) return '目標: 巨大サンゴを刈って沈没船へ';
+  if (cutterLevel < 8) return '目標: 宝箱を開けて深海へ';
+  return '深海の光柱を刈れる';
 }
 
 export function canCutText(cutterLevel) {
