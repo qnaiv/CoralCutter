@@ -410,6 +410,8 @@ export class World {
       const sprite = makeLabel(def.text, def.bg, def.fg, def.scale);
       sprite.position.set(def.x, def.y, def.z);
       sprite.userData.baseY = def.y;
+      sprite.userData.baseSX = sprite.scale.x;
+      sprite.userData.baseSY = sprite.scale.y;
       this.scene.add(sprite);
       return sprite;
     });
@@ -427,8 +429,9 @@ export class World {
     const depth = smoothDepth(state.dist);
     this.fogColor.lerpColors(this.fogShallow, this.fogDeep, depth);
     const fog = this.scene.fog;
-    fog.near = 48 - depth * 20;
-    fog.far = 210 - depth * 90;
+    const span = Math.max(1, state.viewScale || 1);
+    fog.near = (48 - depth * 20) * span;
+    fog.far = (210 - depth * 90) * span;
 
     const pulse = 0.45 + Math.sin(time * 3.1) * 0.2;
     if (this.sellPulse > 0) {
@@ -456,9 +459,14 @@ export class World {
       icon.position.y = 1.35 + Math.sin(time * 2 + i) * 0.1;
       icon.rotation.y = time * 0.6;
     }
+    const mark = state.indicatorScale || 1;
     for (const sign of this.signs) {
       sign.position.y = sign.userData.baseY + Math.sin(time * 1.6 + sign.position.x) * 0.08;
+      if (sign.userData.baseSX) {
+        sign.scale.set(sign.userData.baseSX * mark, sign.userData.baseSY * mark, 1);
+      }
     }
+    for (const icon of this.padIcons) icon.scale.setScalar(mark);
 
     for (const fish of this.fish) {
       fish.age += dt;
@@ -491,7 +499,8 @@ export class World {
 
     if (state.showArrow && state.dist > 8) {
       const ang = Math.atan2(-state.x, -state.z);
-      const ahead = 3.3;
+      const mark = state.indicatorScale || 1;
+      const ahead = 3.3 * mark;
       const ax = state.x + Math.sin(ang) * ahead;
       const az = state.z + Math.cos(ang) * ahead;
       this.arrow.visible = true;
@@ -499,7 +508,7 @@ export class World {
       // Shape tip is -Z after rotateX(-90°). Flip so it points along +Z at yaw 0,
       // then yaw toward the base (atan2 matches the sub's facing).
       this.arrow.rotation.y = ang + Math.PI;
-      const s = 1.15 + Math.sin(time * 6) * 0.08;
+      const s = (1.15 + Math.sin(time * 6) * 0.08) * mark;
       this.arrow.scale.setScalar(s);
     } else {
       this.arrow.visible = false;

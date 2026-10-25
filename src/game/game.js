@@ -17,6 +17,7 @@ import {
   propSpeed,
   tankCapacity,
 } from './constants.js';
+import { cameraRig } from './cameraRig.js';
 import { features } from './features.js';
 import { FX } from './fx.js';
 import { Input } from './input.js';
@@ -27,17 +28,6 @@ import { clearSave, loadSave, writeSave } from './save.js';
 import { zoneAt } from './terrain.js';
 import { UI } from './ui.js';
 import { World } from './world.js';
-
-const CAM = {
-  height: 20,
-  back: 12,
-  lift: 1.6,
-  fov: 42,
-  heightNarrow: 27,
-  backNarrow: 14,
-  liftNarrow: 3.6,
-  fovNarrow: 50,
-};
 
 export class Game {
   constructor(app) {
@@ -73,7 +63,7 @@ export class Game {
     this.debug = new URLSearchParams(location.search).has('debug');
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(CAM.fov, 1, 0.1, 480);
+    this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 480);
     this.camera.position.set(12, 18, 16);
     this.curLook = new THREE.Vector3(0, 0.4, 0);
     this.desiredCam = new THREE.Vector3();
@@ -187,14 +177,18 @@ export class Game {
   resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const narrow = w / Math.max(h, 1) < 0.9;
-    this.narrow = narrow;
-    this.camera.fov = narrow ? CAM.fovNarrow : CAM.fov;
     this.camera.aspect = w / Math.max(h, 1);
-    this.camera.updateProjectionMatrix();
+    this.applyRig();
     const mobile = Math.min(w, h) < 820;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, mobile ? 1.25 : 1.6));
     this.renderer.setSize(w, h, false);
+  }
+
+  applyRig() {
+    const rig = cameraRig(this.camera.aspect || 1);
+    this.rig = rig;
+    this.camera.fov = rig.fov;
+    this.camera.updateProjectionMatrix();
   }
 
   computeMove(axis) {
@@ -389,6 +383,8 @@ export class Game {
       z: this.player.z,
       dist,
       showArrow: this.started && cap > 0 && this.tank.cargo / cap >= 0.75,
+      viewScale: this.rig?.distScale ?? 1,
+      indicatorScale: this.rig?.indicatorScale ?? 1,
     });
     const shown = cap > 0 ? Math.round((this.tank.cargo / cap) * this.player.chunks.length) : 0;
     this.player.syncPile(this.tank.pieces, shown);
@@ -445,16 +441,15 @@ export class Game {
   }
 
   updateCamera(dt) {
+    const rig = this.rig || cameraRig(this.camera.aspect || 1);
     if (!this.started) {
       const ang = this.time * 0.18;
-      this.desiredCam.set(Math.sin(ang) * 16, 15.5, Math.cos(ang) * 16);
+      const orbit = 16 * rig.distScale;
+      this.desiredCam.set(Math.sin(ang) * orbit, rig.height * 0.78, Math.cos(ang) * orbit);
       this.lookAt.set(0, 0.6, 0);
     } else {
-      const height = this.narrow ? CAM.heightNarrow : CAM.height;
-      const back = this.narrow ? CAM.backNarrow : CAM.back;
-      const lift = this.narrow ? CAM.liftNarrow : CAM.lift;
-      this.desiredCam.set(this.player.x, height, this.player.z + back);
-      this.lookAt.set(this.player.x, 0.4, this.player.z + lift);
+      this.desiredCam.set(this.player.x, rig.height, this.player.z + rig.back);
+      this.lookAt.set(this.player.x, rig.lookY, this.player.z + rig.lift);
     }
     const follow = 1 - Math.exp(-3.4 * dt);
     this.camera.position.lerp(this.desiredCam, follow);

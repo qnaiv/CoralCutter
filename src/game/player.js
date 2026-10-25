@@ -13,8 +13,10 @@ export class Player {
     this.vx = 0;
     this.vz = 0;
     this.angle = 0.7;
-    this.radius = 1.05;
-    this.cutterOffset = 1.72;
+    // Hull reads clearly after the camera pullback. The saw stays on the cutter point.
+    this.modelScale = 1.3;
+    this.radius = 1.05 * this.modelScale;
+    this.cutterOffset = 1.72 * this.modelScale;
     this.speed = 0;
     this.cutMode = 'idle';
     this.root = new THREE.Group();
@@ -154,6 +156,8 @@ export class Player {
     this.lamp = new THREE.PointLight(0xd9fff6, 10, 18, 2);
     this.lamp.position.set(0, 1.5, 0.6);
     this.root.add(this.lamp);
+    this.sawSpin.position.z = 1.72;
+    this.tilt.scale.setScalar(this.modelScale);
   }
 
   _buildPile() {
@@ -185,7 +189,7 @@ export class Player {
     );
     fill.rotation.x = -Math.PI / 2;
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.9, 1, 36),
+      new THREE.RingGeometry(0.82, 1, 40),
       new THREE.MeshBasicMaterial({
         color: 0xffffff,
         transparent: true,
@@ -212,6 +216,7 @@ export class Player {
       }),
     );
     this.shadow.rotation.x = -Math.PI / 2;
+    this.shadow.scale.setScalar(this.modelScale);
     this.scene.add(this.shadow);
   }
 
