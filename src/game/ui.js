@@ -32,19 +32,34 @@ export class UI {
     this.onReset = null;
     this.onToggleMute = null;
     this.onBuy = null;
+    this.onDeny = null;
+    this.onUi = null;
 
-    this.startBtn.addEventListener('click', () => this.onStart?.());
-    document.getElementById('reset').addEventListener('click', () => this.onReset?.());
+    this.startBtn.addEventListener('click', () => {
+      this.onUi?.();
+      this.onStart?.();
+    });
+    document.getElementById('reset').addEventListener('click', () => {
+      this.onUi?.();
+      this.onReset?.();
+    });
     this.muteBtn.addEventListener('click', () => this.onToggleMute?.());
     this.cards.addEventListener('pointerdown', (e) => {
       const btn = e.target.closest('[data-buy]');
       if (!btn || btn.disabled) return;
       e.preventDefault();
       e.stopPropagation();
+      if (btn.dataset.broke === '1') {
+        this.onDeny?.();
+        return;
+      }
       this.onBuy?.(btn.dataset.buy);
     });
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'Enter' && !this.hud.classList.contains('playing')) this.onStart?.();
+      if (e.code === 'Enter' && !this.hud.classList.contains('playing')) {
+        this.onUi?.();
+        this.onStart?.();
+      }
     });
   }
 
@@ -153,6 +168,7 @@ export class UI {
       const maxed = level >= def.max;
       const cost = def.cost(level);
       const afford = !maxed && cost != null && state.rawMoney >= cost;
+      const broke = !maxed && !afford;
       const card = document.createElement('article');
       card.className = 'card';
       if (state.nearPad === def.id) card.classList.add('near');
@@ -160,7 +176,10 @@ export class UI {
       const button = document.createElement('button');
       button.type = 'button';
       button.dataset.buy = def.id;
-      button.disabled = !afford;
+      button.disabled = maxed;
+      button.classList.toggle('is-broke', broke);
+      button.dataset.broke = broke ? '1' : '';
+      if (broke) button.setAttribute('aria-disabled', 'true');
       button.textContent = buyLabel(cost, state.rawMoney, maxed);
       button.style.background = afford ? def.color : '#3c5563';
       const name = document.createElement('div');
