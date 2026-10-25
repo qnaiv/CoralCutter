@@ -17,7 +17,7 @@ import {
   propSpeed,
   tankCapacity,
 } from './constants.js';
-import { cameraRig } from './cameraRig.js';
+import { VIEW_ZOOM_MAX, VIEW_ZOOM_MIN, cameraRig } from './cameraRig.js';
 import { features } from './features.js';
 import { FX } from './fx.js';
 import { Input } from './input.js';
@@ -42,6 +42,8 @@ export class Game {
       price: clamp(this.save.levels.price, 1, PRICE_LEVELS.length),
     };
     this.stats = { ...this.save.stats };
+    this.viewZoom = clamp(this.save.viewZoom ?? 1, VIEW_ZOOM_MIN, VIEW_ZOOM_MAX);
+    this.zoom = this.viewZoom;
     this.tank = { cargo: 0, value: 0, pieces: [], warned: false };
     this.started = false;
     this.playTime = 0;
@@ -92,6 +94,8 @@ export class Game {
     this.audio.setMuted(this.save.mute);
     this.input = new Input();
     this.input.unlock = () => this.audio.unlock();
+    this.input.onZoom = (factor) => this.nudgeZoom(factor);
+    this.input.onZoomEnd = () => this.persist();
     this.ui = new UI();
     this.ui.setTitleStats(this.snapshot());
     this.ui.onStart = () => this.startPlay();
@@ -136,7 +140,17 @@ export class Game {
       levels: { ...this.levels },
       stats: { ...this.stats },
       mute: this.audio.muted,
+      viewZoom: this.viewZoom,
     };
+  }
+
+  nudgeZoom(factor) {
+    if (!Number.isFinite(factor) || factor <= 0) return;
+    const next = clamp(this.viewZoom * factor, VIEW_ZOOM_MIN, VIEW_ZOOM_MAX);
+    if (Math.abs(next - this.viewZoom) < 0.0004) return;
+    this.viewZoom = next;
+    clearTimeout(this._zoomSave);
+    this._zoomSave = setTimeout(() => this.persist(), 280);
   }
 
   persist() {
@@ -178,6 +192,7 @@ export class Game {
     const w = window.innerWidth;
     const h = window.innerHeight;
     this.camera.aspect = w / Math.max(h, 1);
+    this.camera.updateProjectionMatrix();
     this.applyRig();
     const mobile = Math.min(w, h) < 820;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, mobile ? 1.25 : 1.6));
@@ -185,10 +200,12 @@ export class Game {
   }
 
   applyRig() {
-    const rig = cameraRig(this.camera.aspect || 1);
+    const rig = cameraRig(this.camera.aspect || 1, this.zoom ?? 1);
     this.rig = rig;
-    this.camera.fov = rig.fov;
-    this.camera.updateProjectionMatrix();
+    if (this.camera.fov !== rig.fov) {
+      this.camera.fov = rig.fov;
+      this.camera.updateProjectionMatrix();
+    }
   }
 
   computeMove(axis) {
@@ -331,6 +348,9 @@ export class Game {
 
   update(dt) {
     this.time += dt;
+    this.zoom = damp(this.zoom, this.viewZoom, 12, dt);
+    if (Math.abs(this.zoom - this.viewZoom) < 0.0005) this.zoom = this.viewZoom;
+    this.applyRig();
     if (this.started) this.playTime += dt;
     const axis = this.started ? this.input.axis() : null;
     const move = this.started ? this.computeMove(axis) : this._move.set(0, 0, 0);
@@ -441,7 +461,7 @@ export class Game {
   }
 
   updateCamera(dt) {
-    const rig = this.rig || cameraRig(this.camera.aspect || 1);
+    const rig = this.rig || cameraRig(this.camera.aspect || 1, this.zoom ?? 1);
     if (!this.started) {
       const ang = this.time * 0.18;
       const orbit = 16 * rig.distScale;
